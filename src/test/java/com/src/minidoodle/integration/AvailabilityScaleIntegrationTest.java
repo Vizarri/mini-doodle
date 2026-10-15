@@ -86,7 +86,7 @@ class AvailabilityScaleIntegrationTest extends AbstractIntegrationTest {
                             .calendar(calendars.get(user))
                             .startsAt(TEST_DATE.plusDays(day).atTime(source ? 10 : 9, 0).toInstant(ZoneOffset.UTC))
                             .endsAt(TEST_DATE.plusDays(day).atTime(source ? 11 : 12, 0).toInstant(ZoneOffset.UTC))
-                            .statusCode((user == 199 && day == 0 ? SlotStatus.BUSY : SlotStatus.FREE).name())
+                            .status(user == 199 && day == 0 ? SlotStatus.BUSY : SlotStatus.FREE)
                             .build());
                 }
             }

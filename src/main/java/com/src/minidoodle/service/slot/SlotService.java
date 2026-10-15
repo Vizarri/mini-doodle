@@ -51,7 +51,7 @@ public class SlotService {
                 .calendar(calendarRepository.getReferenceById(calendarId))
                 .startsAt(validated.startsAt())
                 .endsAt(validated.endsAt())
-                .statusCode(validated.status().name())
+                .status(validated.status())
                 .build();
         return toResponse(timeSlotRepository.saveAndFlush(slot));
     }

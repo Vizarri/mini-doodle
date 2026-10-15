@@ -3,6 +3,8 @@ package com.src.minidoodle.db.model;
 import com.src.minidoodle.enums.SlotStatus;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
@@ -48,9 +50,10 @@ public class TimeSlot {
     @Column(name = "ends_at", nullable = false)
     private Instant endsAt;
 
-    /** Stable FREE/BUSY persistence code; domain callers use the typed status accessors. */
+    /** Declared availability persisted as the stable FREE/BUSY enum name. */
+    @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 4)
-    private String statusCode;
+    private SlotStatus status;
 
     /** Assigns a UUID before the first insert when the caller has not supplied one. */
     @PrePersist
@@ -58,21 +61,5 @@ public class TimeSlot {
         if (id == null) {
             id = UUID.randomUUID();
         }
-    }
-
-    /**
-     * Resolves the persisted code without including meeting reservations.
-     * @return declared status, or {@code null} before it is assigned
-     */
-    public SlotStatus getStatus() {
-        return statusCode == null ? null : SlotStatus.valueOf(statusCode);
-    }
-
-    /**
-     * Stores the stable enum name used by the database check constraint.
-     * @param status declared availability, or {@code null} while constructing the entity
-     */
-    public void setStatus(SlotStatus status) {
-        statusCode = status == null ? null : status.name();
     }
 }
