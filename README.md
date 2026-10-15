@@ -10,19 +10,29 @@ Docker and Docker Compose v2 are the only runtime prerequisites:
 docker compose up --build -d --wait
 ```
 
-The multi-stage build includes Java and Maven. Compose starts the application and PostgreSQL, waits for health checks and applies Flyway migrations.
+The multi-stage build includes Java and Maven. Compose starts the application and PostgreSQL, waits for health checks and applies Flyway migrations. The first build downloads base images and Maven dependencies and can take several minutes; subsequent builds reuse Docker layers when their inputs have not changed.
 
 - [Swagger UI](http://localhost:8080/swagger-ui/index.html): explore and execute every request.
 - [OpenAPI schema](http://localhost:8080/v3/api-docs).
 - [Health](http://localhost:8080/actuator/health), [Prometheus metrics](http://localhost:8080/actuator/prometheus).
 
-Ports bind to loopback. Override the defaults if another service uses them:
+The default host ports are `8080` for HTTP and `5432` for PostgreSQL, both bound to loopback. Override them if another service uses those ports:
 
 ```sh
 APP_PORT=18080 DB_PORT=15432 docker compose up --build -d --wait
 ```
 
-The local database, username and password are `minidoodle`. When running outside Compose, set `DB_URL`, `DB_USERNAME` and `DB_PASSWORD` as needed.
+To persist overrides, create an optional `.env` file in the project root; it is excluded from Git:
+
+```dotenv
+APP_PORT=8080
+DB_PORT=15432
+DB_LOCK_TIMEOUT=5s
+```
+
+Compose loads `.env` automatically; variables exported by your shell take precedence. `DB_PORT` changes the published host port; the application inside Compose still connects to `db:5432`. If you change `APP_PORT`, use that port in the links above and the example's `BASE` URL.
+
+The local database, username and password are `minidoodle`. When running the application outside Compose, set `DB_URL`, `DB_USERNAME` and `DB_PASSWORD` in the application environment as needed. For a Compose database published on port `15432`, use `DB_URL=jdbc:postgresql://localhost:15432/minidoodle`. Compose's `.env` is not automatically loaded by Spring Boot when it runs directly from Maven or an IDE.
 
 Database lock acquisition waits are limited to `5s` by default. Override `DB_LOCK_TIMEOUT`, for example `DB_LOCK_TIMEOUT=2s docker compose up --build -d --wait`. The application initializes PostgreSQL `lock_timeout` on every pooled connection. This is separate from the Hikari timeout for obtaining a connection from the pool.
 
@@ -55,7 +65,7 @@ com.src.minidoodle
 │   ├── meeting             Booking, details and cancellation
 │   ├── slot                Declared slot management
 │   ├── user                User and calendar creation
-│   └── system
+│   └── system              Ordered calendar locks and shared validation
 │       └── validation      Reusable validation and normalization
 └── util                    Half-open interval operations
 ```
@@ -70,7 +80,7 @@ Controllers depend on services and standalone DTOs. Transactional services coord
 - A meeting occupies the organizer's entire selected `FREE` slot. The organizer is included automatically. Other participants need declared free time covering the whole interval; adjacent free slots can provide that coverage together.
 - Booking adds reservations without rewriting declared slots. Effective free time is declared `FREE` time minus active reservations. Effective busy time combines declared `BUSY` slots with active reservations.
 - Undeclared time is unavailable: it is neither `free` nor `busy` in the response and cannot be booked. The two lists do not necessarily partition the requested window.
-- A slot covering an active reservation cannot be changed or deleted. Cancel the meeting first. Slot `PATCH` accepts the complete body, not a JSON Merge Patch document.
+- A slot overlapping an active reservation cannot be changed or deleted. Cancel the meeting first. Slot `PATCH` accepts the complete body, not a JSON Merge Patch document.
 - Cancellation releases reservations but retains meeting details and participants. Repeated cancellation is harmless, including after another meeting has booked the released time. Deleting a cancelled meeting's former source slot makes its `slotId` null.
 - Personal availability clips and merges intervals. Shared availability intersects free time and unions busy time across the selected users.
 
@@ -78,7 +88,7 @@ Use ISO 8601 timestamps with an explicit offset, such as `2030-01-15T10:00:00Z` 
 
 Slot status accepts only the JSON strings `"FREE"` and `"BUSY"`. Numeric enum values, different casing and unknown strings are rejected.
 
-Slots and query windows are limited to 31 days. Meetings support 50 participants including the organizer; shared queries accept 50 user IDs. Slot listing defaults to 100 items, permits 500, and accepts offsets from 0 to 100000.
+Slots and query windows are limited to 31 days. Meetings support 50 distinct participants including the organizer. The organizer is added automatically and duplicate participant IDs are ignored, but the submitted `participantIds` array is also limited to 50 entries before deduplication. Shared queries accept between 1 and 50 submitted user IDs, with duplicates ignored after the input-count check. Slot listing defaults to 100 items, permits 500, and accepts offsets from 0 to 100000.
 
 ## API
 
@@ -161,10 +171,10 @@ New UUID entities use their lifecycle callbacks. Known-new composite participati
 Install Java 21, Maven 3.9+ and run Docker:
 
 ```sh
-mvn verify
+mvn clean verify
 ```
 
-Test packages mirror application packages under `unit` and `integration`, for example `unit.util`, `integration.controller` and `integration.service.meeting`. The shared PostgreSQL fixture remains in `integration.AbstractIntegrationTest`.
+Test packages mirror application packages under `unit` and `integration`, for example `unit.util`, `integration.controller` and `integration.service.meeting`. Shared PostgreSQL and separate-process fixtures remain in `integration.AbstractIntegrationTest` and `integration.AbstractMultiInstanceIntegrationTest`.
 
 The normal Maven lifecycle runs unit and PostgreSQL integration tests and generates a JaCoCo coverage report at `target/site/jacoco/index.html` (XML: `target/site/jacoco/jacoco.xml`). Integration tests do not silently pass or skip when Docker is unavailable. They apply the actual Flyway migration, reset business tables between tests and use shared fixture helpers.
 
@@ -193,7 +203,7 @@ The integration suite covers:
 
 The multi-instance tests start two separate Java processes from the compiled test/runtime classpath, each with its own HTTP port and connection pool, against the same Testcontainers PostgreSQL. They stop both processes after each test class; their logs remain under `target/multi-instance/` for diagnosis. No previously running application or packaged JAR is required.
 
-The load test uses 200 users and 5,000 declared slots, 16 concurrent workers and a mixed HTTP workload across both processes. It exercises independent bookings, meeting and availability reads, cancellation and repeated cancellation, followed by competing requests for the same time. Assertions check response codes, membership, reservations, restored availability and the absence of overlapping reservations. Measurements are written to `target/load-test-results.json`.
+The load test uses 200 users and 5,000 declared slots, 16 concurrent workers and 835 HTTP requests across both processes. Its final contention phase submits 32 bookings for the same time and requires exactly one success with 31 meeting conflicts. It exercises independent bookings, meeting and availability reads, cancellation and repeated cancellation, followed by competing requests for the same time. Assertions check response codes, membership, reservations, restored availability and the absence of overlapping reservations. Measurements are written to `target/load-test-results.json`.
 
 Run these checks separately with Docker running:
 
