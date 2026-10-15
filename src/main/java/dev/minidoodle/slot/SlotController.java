@@ -1,5 +1,8 @@
 package dev.minidoodle.slot;
 
+import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
+import dev.minidoodle.common.StrictOffsetDateTimeDeserializer;
+
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
@@ -50,7 +53,9 @@ public class SlotController {
     }
 
     public enum Status { FREE, BUSY }
-    public record SlotRequest(@NotNull OffsetDateTime startsAt, @NotNull OffsetDateTime endsAt,
-                              @NotNull Status status) {}
+    public record SlotRequest(
+            @NotNull @JsonDeserialize(using = StrictOffsetDateTimeDeserializer.class) OffsetDateTime startsAt,
+            @NotNull @JsonDeserialize(using = StrictOffsetDateTimeDeserializer.class) OffsetDateTime endsAt,
+            @NotNull Status status) {}
     public record SlotResponse(UUID id, Instant startsAt, Instant endsAt, Status status) {}
 }

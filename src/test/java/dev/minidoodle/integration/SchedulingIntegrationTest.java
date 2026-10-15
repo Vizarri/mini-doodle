@@ -106,6 +106,21 @@ class SchedulingIntegrationTest {
     }
 
     @Test
+    void numericAndQuotedEpochTimestampsAreRejected() {
+        String user = user();
+        long startEpoch = OffsetDateTime.parse(at("09:00")).toEpochSecond();
+        long endEpoch = OffsetDateTime.parse(at("10:00")).toEpochSecond();
+        for (Object start : List.of(startEpoch, Long.toString(startEpoch))) {
+            assertProblem(post("/users/" + user + "/slots", Map.of(
+                    "startsAt", start, "endsAt", at("10:00"), "status", "FREE")), 400);
+        }
+        for (Object end : List.of(endEpoch, Long.toString(endEpoch))) {
+            assertProblem(post("/users/" + user + "/slots", Map.of(
+                    "startsAt", at("09:00"), "endsAt", end, "status", "FREE")), 400);
+        }
+    }
+
+    @Test
     void boundedRequestsRejectExcessiveTimeRangesAndParticipantCounts() {
         String organizer = user();
         JsonNode source = slot(organizer, "10:00", "11:00", "FREE");
