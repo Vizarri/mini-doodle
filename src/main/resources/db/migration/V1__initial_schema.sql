@@ -28,6 +28,8 @@ CREATE TABLE time_slots (
     )
 );
 
+CREATE INDEX time_slots_window_idx ON time_slots (calendar_id, starts_at, id);
+
 CREATE TABLE meetings (
     id UUID PRIMARY KEY,
     organizer_user_id UUID NOT NULL REFERENCES users (id),
