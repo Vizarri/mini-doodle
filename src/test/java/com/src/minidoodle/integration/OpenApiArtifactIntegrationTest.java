@@ -84,6 +84,34 @@ class OpenApiArtifactIntegrationTest extends AbstractIntegrationTest {
         assertThat(Files.readString(output, StandardCharsets.UTF_8)).isEqualTo(first);
     }
 
+    @Test
+    void documentsNullableMeetingFieldsAndStructuredErrorDetails() throws Exception {
+        JsonNode document = objectMapper.readTree(fetchApiDocs());
+        assertThat(document.path("openapi").asText()).startsWith("3.1.");
+        JsonNode schemas = document.path("components").path("schemas");
+        JsonNode meeting = schemas.path("MeetingResponse");
+        JsonNode request = schemas.path("CreateMeetingRequest");
+        JsonNode error = schemas.path("ApiError");
+
+        assertSchemaTypes(meeting.path("properties").path("slotId"), "string", "null");
+        assertThat(meeting.path("properties").path("slotId").path("format").asText()).isEqualTo("uuid");
+        assertSchemaTypes(meeting.path("properties").path("description"), "string", "null");
+        assertSchemaTypes(request.path("properties").path("description"), "string", "null");
+        assertRequired(meeting, "id", "organizerId", "slotId", "title", "description", "startsAt", "endsAt", "participantIds", "status");
+        assertRequired(request, "organizerId", "slotId", "title", "participantIds");
+        assertRequired(error, "status", "code", "message", "details");
+        assertSchemaTypes(error.path("properties").path("details"), "object");
+    }
+
+    /** JSON Schema permits a single type string or an array; nullability is independent of required fields. */
+    private void assertSchemaTypes(JsonNode property, String... expectedTypes) {
+        Set<String> types = new HashSet<>();
+        JsonNode type = property.path("type");
+        if (type.isTextual()) types.add(type.asText());
+        else type.forEach(value -> types.add(value.asText()));
+        assertThat(types).as("schema types: %s", property).containsExactlyInAnyOrder(expectedTypes);
+    }
+
     private String fetchApiDocs() throws Exception {
         return mockMvc.perform(get("/v3/api-docs")).andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString();

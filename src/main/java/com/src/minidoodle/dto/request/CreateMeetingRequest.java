@@ -31,7 +31,7 @@ public record CreateMeetingRequest(
         @NotBlank @Size(max = MAX_MEETING_TITLE_LENGTH)
         @Schema(example = "Design review", requiredMode = REQUIRED) String title,
         @Size(max = MAX_MEETING_DESCRIPTION_LENGTH)
-        @Schema(description = "Optional meeting details", nullable = true, requiredMode = NOT_REQUIRED) String description,
+        @Schema(description = "Optional meeting details", types = {"string", "null"}, requiredMode = NOT_REQUIRED) String description,
         @NotNull @Size(max = MAX_PARTICIPANTS)
         @Schema(description = "Additional participant IDs; empty is allowed; total including organizer cannot exceed 50", requiredMode = REQUIRED)
         List<@NotNull UUID> participantIds) {

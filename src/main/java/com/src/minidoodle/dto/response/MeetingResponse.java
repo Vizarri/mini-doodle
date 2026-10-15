@@ -27,9 +27,9 @@ import static io.swagger.v3.oas.annotations.media.Schema.RequiredMode.REQUIRED;
 public record MeetingResponse(
         @Schema(requiredMode = REQUIRED) UUID id,
         @Schema(description = "Organizer, also present in participantIds", requiredMode = REQUIRED) UUID organizerId,
-        @Schema(description = "Original slot; null after its deletion following cancellation", nullable = true, requiredMode = REQUIRED) UUID slotId,
+        @Schema(description = "Original slot; null after its deletion following cancellation", types = {"string", "null"}, format = "uuid", requiredMode = REQUIRED) UUID slotId,
         @Schema(requiredMode = REQUIRED) String title,
-        @Schema(description = "Optional details; null when omitted", nullable = true, requiredMode = REQUIRED) String description,
+        @Schema(description = "Optional details; null when omitted", types = {"string", "null"}, requiredMode = REQUIRED) String description,
         @Schema(description = "Inclusive start in UTC", requiredMode = REQUIRED) Instant startsAt,
         @Schema(description = "Exclusive end in UTC", requiredMode = REQUIRED) Instant endsAt,
         @Schema(description = "Distinct participant IDs including the organizer", requiredMode = REQUIRED) List<UUID> participantIds,

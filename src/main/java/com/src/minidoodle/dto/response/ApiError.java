@@ -3,6 +3,8 @@ package com.src.minidoodle.dto.response;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Builder;
 
+import java.util.Map;
+
 import static io.swagger.v3.oas.annotations.media.Schema.RequiredMode.REQUIRED;
 
 /**
@@ -18,5 +20,5 @@ public record ApiError(
         @Schema(example = "400", requiredMode = REQUIRED) int status,
         @Schema(example = "VALIDATION_FAILED", requiredMode = REQUIRED) String code,
         @Schema(example = "Validation failed", requiredMode = REQUIRED) String message,
-        @Schema(description = "Object containing the request path and optional validation details", type = "object", requiredMode = REQUIRED) Object details) {
+        @Schema(description = "Object containing the request path and optional validation details", types = {"object"}, requiredMode = REQUIRED) Map<String, Object> details) {
 }

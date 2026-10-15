@@ -10,6 +10,7 @@ import org.springframework.test.web.servlet.request.MockMvcRequestBuilders;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -17,6 +18,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import java.util.stream.Stream;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpMethod;
@@ -92,6 +94,35 @@ class HttpContractIntegrationTest extends AbstractIntegrationTest {
         assertInstant(body(created).path("startsAt"), at("09:00"));
         assertError(get("/users/" + user + "/availability?from=" + at("11:00") + "&to=" + at("09:00")), 400, ApiErrorCode.INVALID_TIME_RANGE);
         assertError(get("/users/" + user + "/slots?from=" + at("08:00") + "&to=" + at("12:00") + "&limit=501"), 400, ApiErrorCode.VALIDATION_FAILED);
+    }
+
+    @ParameterizedTest(name = "invalid window timestamp {0} is a query binding error")
+    @ValueSource(strings = {"not-a-timestamp", "2035-06-01T09:00:00"})
+    void invalidWindowTimestampSyntaxUsesBadRequest(String invalidTimestamp) {
+        String user = user();
+        for (String path : List.of("/users/" + user + "/slots", "/users/" + user + "/availability", "/availability?userIds=" + user)) {
+            assertError(getWindow(path, invalidTimestamp, at("10:00")), 400, ApiErrorCode.BAD_REQUEST);
+        }
+    }
+
+    @Test
+    void subMicrosecondPrecisionIsRejectedWithoutMutation() {
+        String user = user();
+        JsonNode original = slot(user, "10:00", "11:00", "FREE");
+        List<List<String>> ranges = List.of(
+                List.of("2035-06-01T09:00:00.000000001Z", at("10:00")),
+                List.of(at("12:00"), "2035-06-01T13:00:00.000000001Z"));
+        for (List<String> range : ranges) {
+            String from = range.getFirst();
+            String to = range.getLast();
+            Map<String, String> invalid = Map.of("startsAt", from, "endsAt", to, "status", "FREE");
+            assertError(post("/users/" + user + "/slots", invalid), 400, ApiErrorCode.INVALID_TIME_RANGE);
+            assertError(request(HttpMethod.PATCH, slotPath(user, original), invalid), 400, ApiErrorCode.INVALID_TIME_RANGE);
+            for (String path : List.of("/users/" + user + "/slots", "/users/" + user + "/availability", "/availability?userIds=" + user)) {
+                assertError(getWindow(path, from, to), 400, ApiErrorCode.INVALID_TIME_RANGE);
+            }
+        }
+        assertOnlyOriginalSlot(user, original);
     }
 
     @Test
@@ -318,6 +349,45 @@ class HttpContractIntegrationTest extends AbstractIntegrationTest {
         assertIntervals(availability(participant).path("free"), "09:00", "12:00");
         assertIntervals(availability(participant).path("busy"));
         book(organizer, source, List.of(participant));
+    }
+
+    @ParameterizedTest(name = "retained meeting supports explicit null description: {0}")
+    @ValueSource(booleans = {false, true})
+    void cancelledMeetingRetainsNullableDetailsAfterSourceDeletion(boolean explicitNull) {
+        String organizer = user();
+        String participant = user();
+        JsonNode source = slot(organizer, "10:00", "11:00", "FREE");
+        slot(participant, "09:00", "12:00", "FREE");
+        Map<String, Object> booking = new LinkedHashMap<>(meetingBody(organizer, source, List.of(participant)));
+        if (explicitNull) {
+            booking.put("description", null);
+        } else {
+            booking.remove("description");
+        }
+
+        var created = post("/meetings", booking);
+        assertThat(created.getStatusCode().value()).as("booking without description: %s", created.getBody()).isEqualTo(201);
+        JsonNode meeting = body(created);
+        assertThat(meeting.path("description").isNull()).isTrue();
+        assertThat(meeting.path("slotId").asText()).isEqualTo(id(source));
+        String path = "/meetings/" + id(meeting);
+        assertThat(request(HttpMethod.DELETE, path, null).getStatusCode().value()).isEqualTo(204);
+        assertThat(request(HttpMethod.DELETE, slotPath(organizer, source), null).getStatusCode().value()).isEqualTo(204);
+
+        var fetched = get(path);
+        assertThat(fetched.getStatusCode().value()).isEqualTo(200);
+        JsonNode retained = body(fetched);
+        assertThat(retained.path("description").isNull()).isTrue();
+        assertThat(retained.path("slotId").isNull()).isTrue();
+        assertThat(retained.path("status").asText()).isEqualTo("CANCELLED");
+        assertThat(retained.path("id").asText()).isEqualTo(id(meeting));
+        assertThat(retained.path("organizerId").asText()).isEqualTo(organizer);
+        assertThat(retained.path("title").asText()).isEqualTo("Design review");
+        assertInstant(retained.path("startsAt"), at("10:00"));
+        assertInstant(retained.path("endsAt"), at("11:00"));
+        assertThat(strings(retained.path("participantIds"))).containsExactlyInAnyOrder(organizer, participant);
+        assertIntervals(availability(participant).path("free"), "09:00", "12:00");
+        assertIntervals(availability(participant).path("busy"));
     }
 
     @Test
