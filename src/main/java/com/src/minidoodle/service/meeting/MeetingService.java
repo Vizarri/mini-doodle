@@ -30,7 +30,7 @@ import java.util.UUID;
 
 /**
  * Coordinates atomic booking and cancellation across participant calendars.
- * Calendar locks precede mutable scheduling reads and meeting-row locks, maintaining one lock order.
+ * Calendar locks serialize schedule mutations and precede reads of mutable scheduling state.
  */
 @Service
 @RequiredArgsConstructor
@@ -117,8 +117,8 @@ public class MeetingService {
             throw new ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.MEETING_NOT_FOUND, "Meeting not found");
         }
         calendarLockService.lockUsers(participantIds);
-        Meeting meeting = meetingRepository.findLockedById(meetingId).orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.MEETING_NOT_FOUND, "Meeting not found"));
-        // A locking query does not replace state already loaded by an outer REQUIRED transaction.
+        Meeting meeting = meetingRepository.findById(meetingId).orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.MEETING_NOT_FOUND, "Meeting not found"));
+        // REQUIRED may join an outer transaction with a meeting cached before acquiring the locks.
         entityManager.refresh(meeting);
         if (meeting.getCancelledAt() != null) {
             return;

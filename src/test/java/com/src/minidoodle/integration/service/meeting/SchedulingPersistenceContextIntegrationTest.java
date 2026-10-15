@@ -1,12 +1,15 @@
 package com.src.minidoodle.integration.service.meeting;
 
+import com.src.minidoodle.db.model.Meeting;
 import com.src.minidoodle.db.model.TimeSlot;
+import com.src.minidoodle.dto.response.MeetingResponse;
 import com.src.minidoodle.dto.response.SlotResponse;
 import com.src.minidoodle.dto.response.UserResponse;
 import com.src.minidoodle.enums.ApiErrorCode;
 import com.src.minidoodle.enums.SlotStatus;
 import com.src.minidoodle.exception.ApiException;
 import com.src.minidoodle.integration.AbstractIntegrationTest;
+import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -101,6 +104,35 @@ class SchedulingPersistenceContextIntegrationTest extends AbstractIntegrationTes
         assertThat(timeSlotRepository.findById(source.id())).isEmpty();
         assertThat(meetingRepository.count()).isZero();
         assertThat(meetingReservationRepository.count()).isZero();
+    }
+
+    @Test
+    void repeatedCancellationRefreshesACachedMeetingAfterItsSourceWasDeleted() {
+        UserResponse organizer = createUser();
+        SlotResponse source = createSlot(organizer.id(), "10:00", "11:00", SlotStatus.FREE);
+        MeetingResponse meeting = createMeeting(organizer.id(), source.id(), List.of());
+
+        outerTransaction().executeWithoutResult(status -> {
+            Meeting cached = meetingRepository.findById(meeting.id()).orElseThrow();
+            assertThat(cached.getCancelledAt()).isNull();
+            assertThat(cached.getSourceSlot().getId()).isEqualTo(source.id());
+            independentTransaction().executeWithoutResult(inner -> {
+                meetingService.cancel(meeting.id());
+                slotService.delete(organizer.id(), source.id());
+            });
+            Instant cancelledAt = independentTransaction().execute(inner -> meetingRepository.findById(meeting.id()).orElseThrow().getCancelledAt());
+            assertThat(cancelledAt).isNotNull();
+
+            meetingService.cancel(meeting.id());
+
+            assertThat(cached.getCancelledAt()).isEqualTo(cancelledAt);
+            assertThat(cached.getSourceSlot()).isNull();
+        });
+
+        assertThat(meetingRepository.findById(meeting.id())).hasValueSatisfying(cancelled -> assertThat(cancelled.getSourceSlot()).isNull());
+        assertThat(timeSlotRepository.findById(source.id())).isEmpty();
+        assertThat(meetingReservationRepository.count()).isZero();
+        assertThat(meetingParticipantRepository.count()).isEqualTo(1);
     }
 
     private TransactionTemplate outerTransaction() {
