@@ -1,7 +1,12 @@
-package com.src.minidoodle.integration;
+package com.src.minidoodle.integration.service.availability;
 
+import com.src.minidoodle.dto.response.AvailabilityResponse;
+import com.src.minidoodle.dto.response.MeetingResponse;
+import com.src.minidoodle.dto.response.SlotResponse;
 import com.src.minidoodle.dto.response.TimeIntervalResponse;
+import com.src.minidoodle.dto.response.UserResponse;
 import com.src.minidoodle.enums.SlotStatus;
+import com.src.minidoodle.integration.AbstractIntegrationTest;
 import com.zaxxer.hikari.HikariDataSource;
 import java.util.List;
 import javax.sql.DataSource;
@@ -34,23 +39,23 @@ class AvailabilitySingleConnectionIntegrationTest extends AbstractIntegrationTes
     void bookingAvailabilityAndCancellationCompleteWithOneDatabaseConnection() {
         assertThat(dataSource).isInstanceOf(HikariDataSource.class);
         assertThat(((HikariDataSource) dataSource).getMaximumPoolSize()).isOne();
-        var organizer = createUser();
-        var participant = createUser();
-        var source = createSlot(organizer.id(), "10:00", "11:00", SlotStatus.FREE);
+        UserResponse organizer = createUser();
+        UserResponse participant = createUser();
+        SlotResponse source = createSlot(organizer.id(), "10:00", "11:00", SlotStatus.FREE);
         createSlot(participant.id(), "09:00", "12:00", SlotStatus.FREE);
-        var meeting = createMeeting(organizer.id(), source.id(), List.of(participant.id()));
+        MeetingResponse meeting = createMeeting(organizer.id(), source.id(), List.of(participant.id()));
 
-        var personal = availabilityService.personal(participant.id(), instant("08:00"), instant("13:00"));
+        AvailabilityResponse personal = availabilityService.personal(participant.id(), instant("08:00"), instant("13:00"));
         assertThat(personal.free()).extracting(TimeIntervalResponse::startsAt, TimeIntervalResponse::endsAt)
                 .containsExactly(tuple(instant("09:00"), instant("10:00")),
                         tuple(instant("11:00"), instant("12:00")));
-        var shared = availabilityService.common(List.of(organizer.id(), participant.id()), instant("08:00"), instant("13:00"));
+        AvailabilityResponse shared = availabilityService.common(List.of(organizer.id(), participant.id()), instant("08:00"), instant("13:00"));
         assertThat(shared.free()).isEmpty();
         assertThat(shared.busy()).extracting(TimeIntervalResponse::startsAt, TimeIntervalResponse::endsAt)
                 .containsExactly(tuple(instant("10:00"), instant("11:00")));
 
         meetingService.cancel(meeting.id());
-        var restored = availabilityService.personal(participant.id(), instant("08:00"), instant("13:00"));
+        AvailabilityResponse restored = availabilityService.personal(participant.id(), instant("08:00"), instant("13:00"));
         assertThat(restored.free()).extracting(TimeIntervalResponse::startsAt, TimeIntervalResponse::endsAt)
                 .containsExactly(tuple(instant("09:00"), instant("12:00")));
         assertThat(restored.busy()).isEmpty();

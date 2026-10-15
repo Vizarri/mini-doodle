@@ -1,8 +1,9 @@
-package com.src.minidoodle.util;
+package com.src.minidoodle.unit.util;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.src.minidoodle.service.availability.model.TimeInterval;
+import com.src.minidoodle.util.TimeIntervalUtils;
 
 import java.time.Instant;
 import java.util.List;

@@ -160,6 +160,8 @@ Install Java 21, Maven 3.9+ and run Docker:
 mvn verify
 ```
 
+Test packages mirror application packages under `unit` and `integration`, for example `unit.util`, `integration.controller` and `integration.service.meeting`. The shared PostgreSQL fixture remains in `integration.AbstractIntegrationTest`.
+
 The normal Maven lifecycle runs unit and PostgreSQL integration tests. Integration tests do not silently pass or skip when Docker is unavailable. They apply the actual Flyway migration, reset business tables between tests and use shared fixture helpers.
 
 For a quick interval-only run without Docker:

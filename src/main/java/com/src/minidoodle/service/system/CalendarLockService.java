@@ -12,6 +12,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Collection;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
@@ -42,11 +43,11 @@ public class CalendarLockService {
         if (userIds == null || userIds.isEmpty() || userIds.stream().anyMatch(Objects::isNull)) {
             throw new ApiException(HttpStatus.BAD_REQUEST, ApiErrorCode.BAD_REQUEST, "Valid user IDs are required");
         }
-        var distinct = userIds.stream().distinct().toList();
+        List<UUID> distinct = userIds.stream().distinct().toList();
         if (distinct.size() > MAX_PARTICIPANTS) {
             throw new ApiException(HttpStatus.BAD_REQUEST, ApiErrorCode.PARTICIPANT_LIMIT_EXCEEDED, "At most 50 users are allowed");
         }
-        var locked = calendarRepository.lockByUserIds(distinct);
+        List<Calendar> locked = calendarRepository.lockByUserIds(distinct);
         if (locked.size() != distinct.size()) {
             throw new ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.USER_NOT_FOUND, "One or more users do not exist");
         }

@@ -9,6 +9,7 @@ import com.src.minidoodle.dto.response.UserResponse;
 import com.src.minidoodle.enums.ApiErrorCode;
 import com.src.minidoodle.exception.ApiException;
 import com.src.minidoodle.service.system.validation.user.UserValidationService;
+import com.src.minidoodle.service.system.validation.user.ValidatedUser;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -38,7 +39,7 @@ public class UserService {
      */
     @Transactional
     public UserResponse create(CreateUserRequest request) {
-        var validated = userValidationService.validateAndNormalize(request);
+        ValidatedUser validated = userValidationService.validateAndNormalize(request);
         User user = User.builder().name(validated.name()).email(validated.email()).timeZone(validated.timeZone()).build();
         user = userRepository.saveAndFlush(user);
         calendarRepository.save(Calendar.builder().user(user).build());

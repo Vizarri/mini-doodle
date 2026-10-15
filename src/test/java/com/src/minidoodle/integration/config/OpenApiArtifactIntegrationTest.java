@@ -1,13 +1,17 @@
-package com.src.minidoodle.integration;
+package com.src.minidoodle.integration.config;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.src.minidoodle.integration.AbstractIntegrationTest;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
 import org.junit.jupiter.api.Test;
@@ -123,14 +127,14 @@ class OpenApiArtifactIntegrationTest extends AbstractIntegrationTest {
 
     private JsonNode canonicalize(JsonNode node) {
         if (node.isObject()) {
-            var result = JsonNodeFactory.instance.objectNode();
-            var fields = new TreeMap<String, JsonNode>();
+            ObjectNode result = JsonNodeFactory.instance.objectNode();
+            Map<String, JsonNode> fields = new TreeMap<>();
             node.properties().forEach(entry -> fields.put(entry.getKey(), entry.getValue()));
             fields.forEach((name, value) -> result.set(name, canonicalize(value)));
             return result;
         }
         if (node.isArray()) {
-            var result = JsonNodeFactory.instance.arrayNode();
+            ArrayNode result = JsonNodeFactory.instance.arrayNode();
             node.forEach(value -> result.add(canonicalize(value)));
             return result;
         }

@@ -1,4 +1,4 @@
-package com.src.minidoodle.integration;
+package com.src.minidoodle.integration.service.availability;
 
 import com.src.minidoodle.db.model.Calendar;
 import com.src.minidoodle.db.model.TimeSlot;
@@ -6,6 +6,7 @@ import com.src.minidoodle.db.model.User;
 import com.src.minidoodle.dto.response.AvailabilityResponse;
 import com.src.minidoodle.dto.response.TimeIntervalResponse;
 import com.src.minidoodle.enums.SlotStatus;
+import com.src.minidoodle.integration.AbstractIntegrationTest;
 import jakarta.persistence.EntityManagerFactory;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
@@ -13,6 +14,7 @@ import java.util.List;
 import java.util.UUID;
 import java.util.function.Supplier;
 import org.hibernate.SessionFactory;
+import org.hibernate.stat.Statistics;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.test.context.TestPropertySource;
@@ -50,7 +52,7 @@ class AvailabilityScaleIntegrationTest extends AbstractIntegrationTest {
     }
 
     private AvailabilityResponse withBoundedQueries(Supplier<AvailabilityResponse> query) {
-        var statistics = entityManagerFactory.unwrap(SessionFactory.class).getStatistics();
+        Statistics statistics = entityManagerFactory.unwrap(SessionFactory.class).getStatistics();
         statistics.clear();
         AvailabilityResponse result = query.get();
         assertThat(statistics.getPrepareStatementCount())

@@ -64,7 +64,7 @@ public abstract class AbstractIntegrationTest {
     @Autowired protected AvailabilityService availabilityService;
 
     @DynamicPropertySource
-    static void databaseProperties(DynamicPropertyRegistry properties) {
+    protected static void databaseProperties(DynamicPropertyRegistry properties) {
         properties.add("spring.datasource.url", POSTGRES::getJdbcUrl);
         properties.add("spring.datasource.username", POSTGRES::getUsername);
         properties.add("spring.datasource.password", POSTGRES::getPassword);
@@ -73,7 +73,7 @@ public abstract class AbstractIntegrationTest {
     }
 
     @BeforeEach
-    void cleanBusinessTables() {
+    protected void cleanBusinessTables() {
         jdbcTemplate.execute("""
                 TRUNCATE TABLE meeting_reservations, meeting_participants, meetings,
                                time_slots, calendars, users RESTART IDENTITY CASCADE

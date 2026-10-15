@@ -1,8 +1,12 @@
-package com.src.minidoodle.integration;
+package com.src.minidoodle.integration.service.meeting;
 
+import com.src.minidoodle.db.model.TimeSlot;
+import com.src.minidoodle.dto.response.SlotResponse;
+import com.src.minidoodle.dto.response.UserResponse;
 import com.src.minidoodle.enums.ApiErrorCode;
 import com.src.minidoodle.enums.SlotStatus;
 import com.src.minidoodle.exception.ApiException;
+import com.src.minidoodle.integration.AbstractIntegrationTest;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -18,11 +22,11 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class SchedulingPersistenceContextIntegrationTest extends AbstractIntegrationTest {
     @Test
     void bookingRejectsASourceThatBecameBusyAfterItWasCached() {
-        var organizer = createUser();
-        var source = createSlot(organizer.id(), "10:00", "11:00", SlotStatus.FREE);
+        UserResponse organizer = createUser();
+        SlotResponse source = createSlot(organizer.id(), "10:00", "11:00", SlotStatus.FREE);
 
         assertApiFailure(() -> outerTransaction().executeWithoutResult(status -> {
-            var cached = timeSlotRepository.findById(source.id()).orElseThrow();
+            TimeSlot cached = timeSlotRepository.findById(source.id()).orElseThrow();
             assertThat(cached.getStatus()).isEqualTo(SlotStatus.FREE);
             independentTransaction().executeWithoutResult(inner -> slotService.update(
                     organizer.id(), source.id(), slotRequest("10:00", "11:00", SlotStatus.BUSY)));
@@ -36,13 +40,13 @@ class SchedulingPersistenceContextIntegrationTest extends AbstractIntegrationTes
 
     @Test
     void bookingRejectsAParticipantSlotThatBecameBusyAfterItWasCached() {
-        var organizer = createUser();
-        var participant = createUser();
-        var source = createSlot(organizer.id(), "10:00", "11:00", SlotStatus.FREE);
-        var participantSlot = createSlot(participant.id(), "09:00", "12:00", SlotStatus.FREE);
+        UserResponse organizer = createUser();
+        UserResponse participant = createUser();
+        SlotResponse source = createSlot(organizer.id(), "10:00", "11:00", SlotStatus.FREE);
+        SlotResponse participantSlot = createSlot(participant.id(), "09:00", "12:00", SlotStatus.FREE);
 
         assertApiFailure(() -> outerTransaction().executeWithoutResult(status -> {
-            var cached = timeSlotRepository.findById(participantSlot.id()).orElseThrow();
+            TimeSlot cached = timeSlotRepository.findById(participantSlot.id()).orElseThrow();
             assertThat(cached.getStatus()).isEqualTo(SlotStatus.FREE);
             independentTransaction().executeWithoutResult(inner -> slotService.update(
                     participant.id(), participantSlot.id(), slotRequest("09:00", "12:00", SlotStatus.BUSY)));
@@ -55,11 +59,11 @@ class SchedulingPersistenceContextIntegrationTest extends AbstractIntegrationTes
 
     @Test
     void deletingACachedSlotChecksReservationsAtItsCurrentCommittedTime() {
-        var organizer = createUser();
-        var source = createSlot(organizer.id(), "10:00", "11:00", SlotStatus.FREE);
+        UserResponse organizer = createUser();
+        SlotResponse source = createSlot(organizer.id(), "10:00", "11:00", SlotStatus.FREE);
 
         assertApiFailure(() -> outerTransaction().executeWithoutResult(status -> {
-            var cached = timeSlotRepository.findById(source.id()).orElseThrow();
+            TimeSlot cached = timeSlotRepository.findById(source.id()).orElseThrow();
             assertThat(cached.getStartsAt()).isEqualTo(instant("10:00"));
             independentTransaction().executeWithoutResult(inner -> {
                 slotService.update(organizer.id(), source.id(), slotRequest("11:00", "12:00", SlotStatus.FREE));
@@ -82,8 +86,8 @@ class SchedulingPersistenceContextIntegrationTest extends AbstractIntegrationTes
     @ParameterizedTest(name = "{0} reports a cached but deleted source as not found")
     @EnumSource(StaleSlotOperation.class)
     void deletedCachedSourceIsReportedAsMissing(StaleSlotOperation operation) {
-        var organizer = createUser();
-        var source = createSlot(organizer.id(), "10:00", "11:00", SlotStatus.FREE);
+        UserResponse organizer = createUser();
+        SlotResponse source = createSlot(organizer.id(), "10:00", "11:00", SlotStatus.FREE);
 
         assertApiFailure(() -> outerTransaction().executeWithoutResult(status -> {
             assertThat(timeSlotRepository.findById(source.id())).isPresent();

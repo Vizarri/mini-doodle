@@ -46,7 +46,7 @@ public class MeetingValidationService {
                 || request.participantIds().stream().anyMatch(Objects::isNull)) {
             throw new ApiException(HttpStatus.BAD_REQUEST, ApiErrorCode.BAD_REQUEST, "Valid participant IDs are required");
         }
-        var participants = new TreeSet<>(request.participantIds());
+        TreeSet<UUID> participants = new TreeSet<>(request.participantIds());
         participants.add(request.organizerId());
         if (request.participantIds().size() > MAX_PARTICIPANTS || participants.size() > MAX_PARTICIPANTS) {
             throw new ApiException(HttpStatus.BAD_REQUEST, ApiErrorCode.PARTICIPANT_LIMIT_EXCEEDED, "A meeting may have at most 50 participants, including its organizer");

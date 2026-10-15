@@ -1,10 +1,12 @@
-package com.src.minidoodle.integration;
+package com.src.minidoodle.integration.controller;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.src.minidoodle.integration.AbstractIntegrationTest;
 import com.src.minidoodle.enums.ApiErrorCode;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.http.HttpHeaders;
+import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
@@ -36,12 +38,12 @@ class HttpContractIntegrationTest extends AbstractIntegrationTest {
     @Test
     void usersValidateTheirTimeZoneAndRejectDuplicateEmails() {
         String email = UUID.randomUUID() + "@example.com";
-        var created = post("/users", Map.of("name", "Ada", "email", email, "timeZone", "Europe/Berlin"));
+        ResponseEntity<JsonNode> created = post("/users", Map.of("name", "Ada", "email", email, "timeZone", "Europe/Berlin"));
         assertThat(created.getStatusCode().value()).isEqualTo(201);
         assertThat(body(created).path("timeZone").asText()).isEqualTo("Europe/Berlin");
         assertThat(body(created).path("id").asText()).isNotBlank();
 
-        var duplicate = post("/users", Map.of("name", "Ada", "email", email, "timeZone", "UTC"));
+        ResponseEntity<JsonNode> duplicate = post("/users", Map.of("name", "Ada", "email", email, "timeZone", "UTC"));
         assertError(duplicate, 409, ApiErrorCode.EMAIL_ALREADY_EXISTS);
         assertError(post("/users", Map.of("name", "Ada", "email", UUID.randomUUID() + "@example.com",
                 "timeZone", "Mars/Olympus")), 400, ApiErrorCode.INVALID_TIME_ZONE);
@@ -49,12 +51,12 @@ class HttpContractIntegrationTest extends AbstractIntegrationTest {
 
     @Test
     void validationAndMalformedJsonHaveStableMachineReadableErrors() {
-        var invalid = post("/users", Map.of("name", "", "email", "invalid-email", "timeZone", "UTC"));
+        ResponseEntity<JsonNode> invalid = post("/users", Map.of("name", "", "email", "invalid-email", "timeZone", "UTC"));
         assertError(invalid, 400, ApiErrorCode.VALIDATION_FAILED);
         assertThat(body(invalid).path("details").path("fields").has("name")).isTrue();
         assertThat(body(invalid).path("details").path("fields").has("email")).isTrue();
 
-        var unknownField = post("/users", Map.of("name", "Ada", "email", "ada@example.com", "timeZone", "UTC", "unexpected", true));
+        ResponseEntity<JsonNode> unknownField = post("/users", Map.of("name", "Ada", "email", "ada@example.com", "timeZone", "UTC", "unexpected", true));
         assertError(unknownField, 400, ApiErrorCode.MALFORMED_JSON);
     }
 
@@ -65,13 +67,13 @@ class HttpContractIntegrationTest extends AbstractIntegrationTest {
         JsonNode second = slot(user, "10:00", "11:00", "FREE");
         assertError(post("/users/" + user + "/slots", slotBody("09:30", "10:30", "FREE")), 409, ApiErrorCode.SLOT_OVERLAP);
 
-        var updated = request(HttpMethod.PATCH, slotPath(user, first), slotBody("08:30", "10:00", "BUSY"));
+        ResponseEntity<JsonNode> updated = request(HttpMethod.PATCH, slotPath(user, first), slotBody("08:30", "10:00", "BUSY"));
         assertThat(updated.getStatusCode().value()).isEqualTo(200);
         assertThat(body(updated).path("status").asText()).isEqualTo("BUSY");
         assertInstant(body(updated).path("startsAt"), at("08:30"));
         assertError(request(HttpMethod.PATCH, slotPath(user, first), slotBody("09:00", "10:30", "BUSY")), 409, ApiErrorCode.SLOT_OVERLAP);
 
-        var listed = get("/users/" + user + "/slots?from=" + at("08:00") + "&to=" + at("12:00") + "&limit=1&offset=1");
+        ResponseEntity<JsonNode> listed = get("/users/" + user + "/slots?from=" + at("08:00") + "&to=" + at("12:00") + "&limit=1&offset=1");
         assertThat(listed.getStatusCode().value()).isEqualTo(200);
         assertThat(body(listed).size()).isEqualTo(1);
         assertThat(body(listed).get(0).path("id").asText()).isEqualTo(id(second));
@@ -88,7 +90,7 @@ class HttpContractIntegrationTest extends AbstractIntegrationTest {
         assertError(post("/users/" + user + "/slots", Map.of("startsAt", "2035-06-01T09:00:00",
                 "endsAt", at("10:00"), "status", "FREE")), 400, ApiErrorCode.INVALID_TIME_RANGE);
 
-        var created = post("/users/" + user + "/slots", Map.of("startsAt", "2035-06-01T11:00:00+02:00",
+        ResponseEntity<JsonNode> created = post("/users/" + user + "/slots", Map.of("startsAt", "2035-06-01T11:00:00+02:00",
                 "endsAt", "2035-06-01T12:00:00+02:00", "status", "FREE"));
         assertThat(created.getStatusCode().value()).isEqualTo(201);
         assertInstant(body(created).path("startsAt"), at("09:00"));
@@ -185,22 +187,22 @@ class HttpContractIntegrationTest extends AbstractIntegrationTest {
     @MethodSource("supportedUtcBoundaryRanges")
     void supportedUtcBoundaryRangesRoundTrip(String scenario, String from, String to) {
         String user = user();
-        var created = post("/users/" + user + "/slots", Map.of("startsAt", from, "endsAt", to, "status", "FREE"));
+        ResponseEntity<JsonNode> created = post("/users/" + user + "/slots", Map.of("startsAt", from, "endsAt", to, "status", "FREE"));
         assertThat(created.getStatusCode().value()).as("create at boundary: %s", created.getBody()).isEqualTo(201);
         assertInstant(body(created).path("startsAt"), from);
         assertInstant(body(created).path("endsAt"), to);
-        var changed = request(HttpMethod.PATCH, slotPath(user, body(created)),
+        ResponseEntity<JsonNode> changed = request(HttpMethod.PATCH, slotPath(user, body(created)),
                 Map.of("startsAt", from, "endsAt", to, "status", "BUSY"));
         assertThat(changed.getStatusCode().value()).as("update at boundary: %s", changed.getBody()).isEqualTo(200);
 
-        var listed = getWindow("/users/" + user + "/slots", from, to);
+        ResponseEntity<JsonNode> listed = getWindow("/users/" + user + "/slots", from, to);
         assertThat(listed.getStatusCode().value()).isEqualTo(200);
         assertThat(body(listed).size()).isEqualTo(1);
         assertThat(body(listed).get(0).path("status").asText()).isEqualTo("BUSY");
         assertInstant(body(listed).get(0).path("startsAt"), from);
         assertInstant(body(listed).get(0).path("endsAt"), to);
         for (String path : List.of("/users/" + user + "/availability", "/availability?userIds=" + user)) {
-            var available = getWindow(path, from, to);
+            ResponseEntity<JsonNode> available = getWindow(path, from, to);
             assertThat(available.getStatusCode().value()).as("boundary query: %s", available.getBody()).isEqualTo(200);
             assertInstant(body(available).path("from"), from);
             assertInstant(body(available).path("to"), to);
@@ -365,7 +367,7 @@ class HttpContractIntegrationTest extends AbstractIntegrationTest {
             booking.remove("description");
         }
 
-        var created = post("/meetings", booking);
+        ResponseEntity<JsonNode> created = post("/meetings", booking);
         assertThat(created.getStatusCode().value()).as("booking without description: %s", created.getBody()).isEqualTo(201);
         JsonNode meeting = body(created);
         assertThat(meeting.path("description").isNull()).isTrue();
@@ -374,7 +376,7 @@ class HttpContractIntegrationTest extends AbstractIntegrationTest {
         assertThat(request(HttpMethod.DELETE, path, null).getStatusCode().value()).isEqualTo(204);
         assertThat(request(HttpMethod.DELETE, slotPath(organizer, source), null).getStatusCode().value()).isEqualTo(204);
 
-        var fetched = get(path);
+        ResponseEntity<JsonNode> fetched = get(path);
         assertThat(fetched.getStatusCode().value()).isEqualTo(200);
         JsonNode retained = body(fetched);
         assertThat(retained.path("description").isNull()).isTrue();
@@ -399,7 +401,7 @@ class HttpContractIntegrationTest extends AbstractIntegrationTest {
         slot(first, "11:00", "12:00", "BUSY");
         slot(second, "09:00", "12:00", "FREE");
 
-        var response = get("/availability?userIds=" + first + "," + second
+        ResponseEntity<JsonNode> response = get("/availability?userIds=" + first + "," + second
                 + "&from=" + at("09:30") + "&to=" + at("11:30"));
         assertThat(response.getStatusCode().value()).isEqualTo(200);
         assertIntervals(body(response).path("free"), "09:30", "11:00");
@@ -407,25 +409,25 @@ class HttpContractIntegrationTest extends AbstractIntegrationTest {
     }
 
     private String user() {
-        var response = post("/users", Map.of("name", "Test user", "email", UUID.randomUUID() + "@example.com", "timeZone", "UTC"));
+        ResponseEntity<JsonNode> response = post("/users", Map.of("name", "Test user", "email", UUID.randomUUID() + "@example.com", "timeZone", "UTC"));
         assertThat(response.getStatusCode().value()).as("create user: %s", response.getBody()).isEqualTo(201);
         return id(body(response));
     }
 
     private JsonNode slot(String user, String start, String end, String status) {
-        var response = post("/users/" + user + "/slots", slotBody(start, end, status));
+        ResponseEntity<JsonNode> response = post("/users/" + user + "/slots", slotBody(start, end, status));
         assertThat(response.getStatusCode().value()).as("create slot: %s", response.getBody()).isEqualTo(201);
         return body(response);
     }
 
     private JsonNode book(String organizer, JsonNode source, List<String> participants) {
-        var response = post("/meetings", meetingBody(organizer, source, participants));
+        ResponseEntity<JsonNode> response = post("/meetings", meetingBody(organizer, source, participants));
         assertThat(response.getStatusCode().value()).as("book meeting: %s", response.getBody()).isEqualTo(201);
         return body(response);
     }
 
     private JsonNode availability(String user) {
-        var response = get("/users/" + user + "/availability?from=" + at("08:00") + "&to=" + at("13:00"));
+        ResponseEntity<JsonNode> response = get("/users/" + user + "/availability?from=" + at("08:00") + "&to=" + at("13:00"));
         assertThat(response.getStatusCode().value()).isEqualTo(200);
         return body(response);
     }
@@ -452,7 +454,7 @@ class HttpContractIntegrationTest extends AbstractIntegrationTest {
             if (body != null) {
                 request.contentType(MediaType.APPLICATION_JSON).content(objectMapper.writeValueAsString(body));
             }
-            var response = mockMvc.perform(request).andReturn().getResponse();
+            MockHttpServletResponse response = mockMvc.perform(request).andReturn().getResponse();
             HttpHeaders headers = new HttpHeaders();
             response.getHeaderNames().forEach(name -> headers.put(name, new ArrayList<>(response.getHeaders(name))));
             JsonNode content = response.getContentAsByteArray().length == 0
@@ -464,7 +466,7 @@ class HttpContractIntegrationTest extends AbstractIntegrationTest {
     }
 
     private void assertOnlyOriginalSlot(String user, JsonNode original) {
-        var listed = getWindow("/users/" + user + "/slots", at("08:00"), at("14:00"));
+        ResponseEntity<JsonNode> listed = getWindow("/users/" + user + "/slots", at("08:00"), at("14:00"));
         assertThat(listed.getStatusCode().value()).isEqualTo(200);
         assertThat(body(listed).size()).isEqualTo(1);
         assertThat(body(listed).get(0)).isEqualTo(original);

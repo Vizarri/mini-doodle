@@ -1,15 +1,20 @@
-package com.src.minidoodle.integration;
+package com.src.minidoodle.integration.service.meeting;
 
+import com.src.minidoodle.dto.response.AvailabilityResponse;
+import com.src.minidoodle.dto.response.MeetingResponse;
 import com.src.minidoodle.dto.response.SlotResponse;
 import com.src.minidoodle.dto.response.TimeIntervalResponse;
+import com.src.minidoodle.dto.response.UserResponse;
 import com.src.minidoodle.enums.ApiErrorCode;
 import com.src.minidoodle.enums.MeetingStatus;
 import com.src.minidoodle.enums.SlotStatus;
 import com.src.minidoodle.exception.ApiException;
+import com.src.minidoodle.integration.AbstractIntegrationTest;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
@@ -27,14 +32,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 class MeetingConcurrencyIntegrationTest extends AbstractIntegrationTest {
     @Test
     void bookingWaitsForTheWinningTransactionAndRejectsItsCommittedReservation() throws Exception {
-        var firstOrganizer = createUser();
-        var secondOrganizer = createUser();
-        var participant = createUser();
-        var firstSource = createSlot(firstOrganizer.id(), "10:00", "11:00", SlotStatus.FREE);
-        var secondSource = createSlot(secondOrganizer.id(), "10:00", "11:00", SlotStatus.FREE);
+        UserResponse firstOrganizer = createUser();
+        UserResponse secondOrganizer = createUser();
+        UserResponse participant = createUser();
+        SlotResponse firstSource = createSlot(firstOrganizer.id(), "10:00", "11:00", SlotStatus.FREE);
+        SlotResponse secondSource = createSlot(secondOrganizer.id(), "10:00", "11:00", SlotStatus.FREE);
         createSlot(participant.id(), "09:00", "12:00", SlotStatus.FREE);
 
-        var race = withBlockedContender(
+        RaceResult<MeetingResponse, MeetingResponse> race = withBlockedContender(
                 () -> createMeeting(firstOrganizer.id(), firstSource.id(), List.of(participant.id())),
                 () -> createMeeting(secondOrganizer.id(), secondSource.id(), List.of(participant.id())));
 
@@ -47,12 +52,12 @@ class MeetingConcurrencyIntegrationTest extends AbstractIntegrationTest {
 
     @Test
     void bookingRechecksAvailabilityAfterACompetingSlotUpdateCommits() throws Exception {
-        var organizer = createUser();
-        var participant = createUser();
-        var source = createSlot(organizer.id(), "10:00", "11:00", SlotStatus.FREE);
-        var participantSlot = createSlot(participant.id(), "09:00", "12:00", SlotStatus.FREE);
+        UserResponse organizer = createUser();
+        UserResponse participant = createUser();
+        SlotResponse source = createSlot(organizer.id(), "10:00", "11:00", SlotStatus.FREE);
+        SlotResponse participantSlot = createSlot(participant.id(), "09:00", "12:00", SlotStatus.FREE);
 
-        var race = withBlockedContender(
+        RaceResult<SlotResponse, MeetingResponse> race = withBlockedContender(
                 () -> slotService.update(participant.id(), participantSlot.id(), slotRequest("09:00", "12:00", SlotStatus.BUSY)),
                 () -> createMeeting(organizer.id(), source.id(), List.of(participant.id())));
 
@@ -66,17 +71,17 @@ class MeetingConcurrencyIntegrationTest extends AbstractIntegrationTest {
     @ParameterizedTest(name = "{0} waits for booking, then preserves the reserved participant slot")
     @EnumSource(ParticipantSlotMutation.class)
     void participantSlotMutationRejectsTheWinningBookingsReservation(ParticipantSlotMutation mutation) throws Exception {
-        var organizer = createUser();
-        var participant = createUser();
-        var source = createSlot(organizer.id(), "10:00", "11:00", SlotStatus.FREE);
+        UserResponse organizer = createUser();
+        UserResponse participant = createUser();
+        SlotResponse source = createSlot(organizer.id(), "10:00", "11:00", SlotStatus.FREE);
         // UPDATE covers a longer slot; DELETE covers one part of adjacent availability.
         List<SlotResponse> participantSlots = mutation == ParticipantSlotMutation.UPDATE
                 ? List.of(createSlot(participant.id(), "09:00", "12:00", SlotStatus.FREE))
                 : List.of(createSlot(participant.id(), "09:00", "10:30", SlotStatus.FREE),
                           createSlot(participant.id(), "10:30", "12:00", SlotStatus.FREE));
-        var target = participantSlots.getFirst();
+        SlotResponse target = participantSlots.getFirst();
 
-        var race = withBlockedContender(
+        RaceResult<MeetingResponse, Void> race = withBlockedContender(
                 () -> createMeeting(organizer.id(), source.id(), List.of(participant.id())),
                 () -> {
                     if (mutation == ParticipantSlotMutation.UPDATE) {
@@ -94,7 +99,7 @@ class MeetingConcurrencyIntegrationTest extends AbstractIntegrationTest {
         assertThat(meetingReservationRepository.count()).isEqualTo(2);
         assertThat(slotService.list(participant.id(), instant("08:00"), instant("13:00"), 100, 0))
                 .containsExactlyElementsOf(participantSlots);
-        var availability = availabilityService.personal(participant.id(), instant("08:00"), instant("13:00"));
+        AvailabilityResponse availability = availabilityService.personal(participant.id(), instant("08:00"), instant("13:00"));
         assertThat(availability.free()).containsExactly(
                 TimeIntervalResponse.builder().startsAt(instant("09:00")).endsAt(instant("10:00")).build(),
                 TimeIntervalResponse.builder().startsAt(instant("11:00")).endsAt(instant("12:00")).build());
@@ -103,58 +108,58 @@ class MeetingConcurrencyIntegrationTest extends AbstractIntegrationTest {
 
     @Test
     void fiftyParticipantsCanBookAndCancelWithoutLosingAvailabilityOrMembership() {
-        var organizer = createUser();
-        var source = createSlot(organizer.id(), "10:00", "11:00", SlotStatus.FREE);
+        UserResponse organizer = createUser();
+        SlotResponse source = createSlot(organizer.id(), "10:00", "11:00", SlotStatus.FREE);
         List<UUID> participants = new ArrayList<>();
         for (int i = 0; i < 49; i++) {
-            var participant = createUser();
+            UserResponse participant = createUser();
             createSlot(participant.id(), "09:00", "12:00", SlotStatus.FREE);
             participants.add(participant.id());
         }
         List<UUID> everyone = new ArrayList<>(participants);
         everyone.add(organizer.id());
 
-        var meeting = createMeeting(organizer.id(), source.id(), participants);
+        MeetingResponse meeting = createMeeting(organizer.id(), source.id(), participants);
 
         assertThat(meeting.participantIds()).containsExactlyInAnyOrderElementsOf(everyone);
         assertThat(meeting.status()).isEqualTo(MeetingStatus.ACTIVE);
         assertThat(meetingRepository.count()).isEqualTo(1);
         assertThat(meetingParticipantRepository.count()).isEqualTo(50);
         assertThat(meetingReservationRepository.count()).isEqualTo(50);
-        var occupied = availabilityService.common(everyone, instant("08:00"), instant("13:00"));
+        AvailabilityResponse occupied = availabilityService.common(everyone, instant("08:00"), instant("13:00"));
         assertThat(occupied.free()).isEmpty();
         assertThat(occupied.busy()).containsExactly(TimeIntervalResponse.builder().startsAt(instant("10:00")).endsAt(instant("11:00")).build());
 
         meetingService.cancel(meeting.id());
 
-        var cancelled = meetingService.get(meeting.id());
+        MeetingResponse cancelled = meetingService.get(meeting.id());
         assertThat(cancelled.status()).isEqualTo(MeetingStatus.CANCELLED);
         assertThat(cancelled.participantIds()).containsExactlyInAnyOrderElementsOf(everyone);
         assertThat(meetingRepository.count()).isEqualTo(1);
         assertThat(meetingParticipantRepository.count()).isEqualTo(50);
         assertThat(meetingReservationRepository.count()).isZero();
         assertThat(timeSlotRepository.count()).isEqualTo(50);
-        var restored = availabilityService.common(everyone, instant("08:00"), instant("13:00"));
+        AvailabilityResponse restored = availabilityService.common(everyone, instant("08:00"), instant("13:00"));
         assertThat(restored.free()).containsExactly(TimeIntervalResponse.builder().startsAt(instant("10:00")).endsAt(instant("11:00")).build());
         assertThat(restored.busy()).isEmpty();
     }
 
     @Test
     void concurrentCancellationIsIdempotentAndItsReplayPreservesANewerMeeting() throws Exception {
-        var organizer = createUser();
-        var participant = createUser();
-        var source = createSlot(organizer.id(), "10:00", "11:00", SlotStatus.FREE);
+        UserResponse organizer = createUser();
+        UserResponse participant = createUser();
+        SlotResponse source = createSlot(organizer.id(), "10:00", "11:00", SlotStatus.FREE);
         createSlot(participant.id(), "09:00", "12:00", SlotStatus.FREE);
-        var first = createMeeting(organizer.id(), source.id(), List.of(participant.id()));
+        MeetingResponse first = createMeeting(organizer.id(), source.id(), List.of(participant.id()));
 
-        var race = withBlockedContender(
+        RaceResult<Void, Void> race = withBlockedContender(
                 () -> { meetingService.cancel(first.id()); return null; },
                 () -> { meetingService.cancel(first.id()); return null; });
 
         assertThat(race.contender().failure()).isNull();
         assertThat(meetingService.get(first.id()).status()).isEqualTo(MeetingStatus.CANCELLED);
         assertThat(meetingReservationRepository.count()).isZero();
-        var second = createMeeting(organizer.id(), source.id(), List.of(participant.id()));
+        MeetingResponse second = createMeeting(organizer.id(), source.id(), List.of(participant.id()));
         meetingService.cancel(first.id());
         assertThat(meetingService.get(second.id()).status()).isEqualTo(MeetingStatus.ACTIVE);
         assertThat(meetingReservationRepository.count()).isEqualTo(2);
@@ -170,7 +175,7 @@ class MeetingConcurrencyIntegrationTest extends AbstractIntegrationTest {
 
     private <T, U> RaceResult<T, U> withBlockedContender(Supplier<T> holderAction, Supplier<U> contenderAction)
             throws Exception {
-        var executor = Executors.newFixedThreadPool(2);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
         CountDownLatch holderReady = new CountDownLatch(1);
         CountDownLatch releaseHolder = new CountDownLatch(1);
         String suffix = UUID.randomUUID().toString();
