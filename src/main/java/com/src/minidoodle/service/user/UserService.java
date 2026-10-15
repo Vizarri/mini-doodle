@@ -39,8 +39,7 @@ public class UserService {
 
     @Transactional(readOnly = true)
     public UserResponse get(UUID id) {
-        return toResponse(userRepository.findById(id).orElseThrow(() ->
-                new ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.USER_NOT_FOUND, "User not found")));
+        return toResponse(userRepository.findById(id).orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.USER_NOT_FOUND, "User not found")));
     }
 
     private UserResponse toResponse(User user) {

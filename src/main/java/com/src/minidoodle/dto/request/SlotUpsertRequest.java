@@ -11,11 +11,11 @@ import java.time.OffsetDateTime;
 @Schema(description = "Complete slot definition. Required for both creation and PATCH; interval is half-open.")
 public record SlotUpsertRequest(
         @NotNull @JsonDeserialize(using = StrictOffsetDateTimeDeserializer.class)
-        @Schema(description = "Inclusive start with an explicit UTC offset; at most microsecond precision",
+        @Schema(description = "Inclusive start with an explicit UTC offset; UTC years 0001 through 9999; at most microsecond precision",
                 example = "2030-01-15T10:00:00Z") OffsetDateTime startsAt,
         @NotNull @JsonDeserialize(using = StrictOffsetDateTimeDeserializer.class)
-        @Schema(description = "Exclusive end after start; maximum duration 31 days",
+        @Schema(description = "Exclusive end after start; UTC years 0001 through 9999; maximum duration 31 days",
                 example = "2030-01-15T11:00:00Z") OffsetDateTime endsAt,
-        @NotNull @Schema(description = "Declared availability before subtracting meeting reservations", example = "FREE")
+        @NotNull @Schema(description = "FREE or BUSY as a JSON string; declared availability before subtracting meeting reservations", example = "FREE")
         SlotStatus status) {
 }

@@ -25,6 +25,7 @@ spring:
   jackson:
     deserialization:
       fail-on-unknown-properties: true
+      fail-on-numbers-for-enums: true
 
 server:
   shutdown: graceful

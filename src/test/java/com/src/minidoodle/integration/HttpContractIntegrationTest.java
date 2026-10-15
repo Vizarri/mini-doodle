@@ -2,16 +2,22 @@ package com.src.minidoodle.integration;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.src.minidoodle.enums.ApiErrorCode;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.http.HttpHeaders;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders;
+import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
+import java.util.stream.Stream;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
@@ -34,23 +40,20 @@ class HttpContractIntegrationTest extends AbstractIntegrationTest {
         assertThat(body(created).path("id").asText()).isNotBlank();
 
         var duplicate = post("/users", Map.of("name", "Ada", "email", email, "timeZone", "UTC"));
-        assertError(duplicate, 409);
-        assertThat(body(duplicate).path("code").asText()).isEqualTo("EMAIL_ALREADY_EXISTS");
+        assertError(duplicate, 409, ApiErrorCode.EMAIL_ALREADY_EXISTS);
         assertError(post("/users", Map.of("name", "Ada", "email", UUID.randomUUID() + "@example.com",
-                "timeZone", "Mars/Olympus")), 400);
+                "timeZone", "Mars/Olympus")), 400, ApiErrorCode.INVALID_TIME_ZONE);
     }
 
     @Test
     void validationAndMalformedJsonHaveStableMachineReadableErrors() {
         var invalid = post("/users", Map.of("name", "", "email", "invalid-email", "timeZone", "UTC"));
-        assertError(invalid, 400);
-        assertThat(body(invalid).path("code").asText()).isEqualTo("VALIDATION_FAILED");
+        assertError(invalid, 400, ApiErrorCode.VALIDATION_FAILED);
         assertThat(body(invalid).path("details").path("fields").has("name")).isTrue();
         assertThat(body(invalid).path("details").path("fields").has("email")).isTrue();
 
         var unknownField = post("/users", Map.of("name", "Ada", "email", "ada@example.com", "timeZone", "UTC", "unexpected", true));
-        assertError(unknownField, 400);
-        assertThat(body(unknownField).path("code").asText()).isEqualTo("MALFORMED_JSON");
+        assertError(unknownField, 400, ApiErrorCode.MALFORMED_JSON);
     }
 
     @Test
@@ -58,13 +61,13 @@ class HttpContractIntegrationTest extends AbstractIntegrationTest {
         String user = user();
         JsonNode first = slot(user, "09:00", "10:00", "FREE");
         JsonNode second = slot(user, "10:00", "11:00", "FREE");
-        assertError(post("/users/" + user + "/slots", slotBody("09:30", "10:30", "FREE")), 409);
+        assertError(post("/users/" + user + "/slots", slotBody("09:30", "10:30", "FREE")), 409, ApiErrorCode.SLOT_OVERLAP);
 
         var updated = request(HttpMethod.PATCH, slotPath(user, first), slotBody("08:30", "10:00", "BUSY"));
         assertThat(updated.getStatusCode().value()).isEqualTo(200);
         assertThat(body(updated).path("status").asText()).isEqualTo("BUSY");
         assertInstant(body(updated).path("startsAt"), at("08:30"));
-        assertError(request(HttpMethod.PATCH, slotPath(user, first), slotBody("09:00", "10:30", "BUSY")), 409);
+        assertError(request(HttpMethod.PATCH, slotPath(user, first), slotBody("09:00", "10:30", "BUSY")), 409, ApiErrorCode.SLOT_OVERLAP);
 
         var listed = get("/users/" + user + "/slots?from=" + at("08:00") + "&to=" + at("12:00") + "&limit=1&offset=1");
         assertThat(listed.getStatusCode().value()).isEqualTo(200);
@@ -78,17 +81,17 @@ class HttpContractIntegrationTest extends AbstractIntegrationTest {
     @Test
     void slotsRequirePositiveDurationAndExplicitTimeOffsets() {
         String user = user();
-        assertError(post("/users/" + user + "/slots", slotBody("09:00", "09:00", "FREE")), 400);
-        assertError(post("/users/" + user + "/slots", slotBody("10:00", "09:00", "FREE")), 400);
+        assertError(post("/users/" + user + "/slots", slotBody("09:00", "09:00", "FREE")), 400, ApiErrorCode.INVALID_TIME_RANGE);
+        assertError(post("/users/" + user + "/slots", slotBody("10:00", "09:00", "FREE")), 400, ApiErrorCode.INVALID_TIME_RANGE);
         assertError(post("/users/" + user + "/slots", Map.of("startsAt", "2035-06-01T09:00:00",
-                "endsAt", at("10:00"), "status", "FREE")), 400);
+                "endsAt", at("10:00"), "status", "FREE")), 400, ApiErrorCode.MALFORMED_JSON);
 
         var created = post("/users/" + user + "/slots", Map.of("startsAt", "2035-06-01T11:00:00+02:00",
                 "endsAt", "2035-06-01T12:00:00+02:00", "status", "FREE"));
         assertThat(created.getStatusCode().value()).isEqualTo(201);
         assertInstant(body(created).path("startsAt"), at("09:00"));
-        assertError(get("/users/" + user + "/availability?from=" + at("11:00") + "&to=" + at("09:00")), 400);
-        assertError(get("/users/" + user + "/slots?from=" + at("08:00") + "&to=" + at("12:00") + "&limit=501"), 400);
+        assertError(get("/users/" + user + "/availability?from=" + at("11:00") + "&to=" + at("09:00")), 400, ApiErrorCode.INVALID_TIME_RANGE);
+        assertError(get("/users/" + user + "/slots?from=" + at("08:00") + "&to=" + at("12:00") + "&limit=501"), 400, ApiErrorCode.VALIDATION_FAILED);
     }
 
     @Test
@@ -98,12 +101,91 @@ class HttpContractIntegrationTest extends AbstractIntegrationTest {
         long endEpoch = OffsetDateTime.parse(at("10:00")).toEpochSecond();
         for (Object start : List.of(startEpoch, Long.toString(startEpoch))) {
             assertError(post("/users/" + user + "/slots", Map.of(
-                    "startsAt", start, "endsAt", at("10:00"), "status", "FREE")), 400);
+                    "startsAt", start, "endsAt", at("10:00"), "status", "FREE")), 400, ApiErrorCode.MALFORMED_JSON);
         }
         for (Object end : List.of(endEpoch, Long.toString(endEpoch))) {
             assertError(post("/users/" + user + "/slots", Map.of(
-                    "startsAt", at("09:00"), "endsAt", end, "status", "FREE")), 400);
+                    "startsAt", at("09:00"), "endsAt", end, "status", "FREE")), 400, ApiErrorCode.MALFORMED_JSON);
         }
+    }
+
+    @ParameterizedTest(name = "numeric enum value {0} cannot create or modify a slot")
+    @MethodSource("numericSlotStatuses")
+    void numericSlotStatusesAreRejectedWithoutMutation(Object status) {
+        String user = user();
+        JsonNode original = slot(user, "10:00", "11:00", "FREE");
+        Map<String, Object> invalid = Map.of("startsAt", at("12:00"), "endsAt", at("13:00"), "status", status);
+
+        assertError(post("/users/" + user + "/slots", invalid), 400, ApiErrorCode.MALFORMED_JSON);
+        assertError(request(HttpMethod.PATCH, slotPath(user, original), invalid), 400, ApiErrorCode.MALFORMED_JSON);
+        assertOnlyOriginalSlot(user, original);
+    }
+
+    private static Stream<Arguments> numericSlotStatuses() {
+        return Stream.of(Arguments.of(0), Arguments.of(1), Arguments.of("0"), Arguments.of("1"));
+    }
+
+    @ParameterizedTest(name = "{0} is rejected by commands and every window query")
+    @MethodSource("unsupportedUtcRanges")
+    void unsupportedUtcRangesAreRejectedEverywhere(String scenario, String from, String to) {
+        String user = user();
+        JsonNode original = slot(user, "10:00", "11:00", "FREE");
+        Map<String, String> invalid = Map.of("startsAt", from, "endsAt", to, "status", "FREE");
+
+        assertError(post("/users/" + user + "/slots", invalid), 400, ApiErrorCode.INVALID_TIME_RANGE);
+        assertError(request(HttpMethod.PATCH, slotPath(user, original), invalid), 400, ApiErrorCode.INVALID_TIME_RANGE);
+        for (String path : List.of("/users/" + user + "/slots", "/users/" + user + "/availability",
+                "/availability?userIds=" + user)) {
+            assertError(getWindow(path, from, to), 400, ApiErrorCode.INVALID_TIME_RANGE);
+        }
+        assertOnlyOriginalSlot(user, original);
+    }
+
+    private static Stream<Arguments> unsupportedUtcRanges() {
+        return Stream.of(
+                Arguments.of("year above the database range", "+300000-01-01T10:00:00Z", "+300000-01-01T11:00:00Z"),
+                Arguments.of("year zero", "0000-01-01T10:00:00Z", "0000-01-01T11:00:00Z"),
+                Arguments.of("offset moves the start below UTC year one", "0001-01-01T00:00:00+01:00", "0001-01-01T02:00:00+01:00"),
+                Arguments.of("offset moves the interval above UTC year 9999", "9999-12-31T22:00:00-02:00", "9999-12-31T23:00:00-02:00"),
+                Arguments.of("end equals the exclusive UTC upper bound", "9999-12-31T23:00:00Z", "+10000-01-01T00:00:00Z"));
+    }
+
+    @ParameterizedTest(name = "{0} remains usable for persisted slots and window queries")
+    @MethodSource("supportedUtcBoundaryRanges")
+    void supportedUtcBoundaryRangesRoundTrip(String scenario, String from, String to) {
+        String user = user();
+        var created = post("/users/" + user + "/slots", Map.of("startsAt", from, "endsAt", to, "status", "FREE"));
+        assertThat(created.getStatusCode().value()).as("create at boundary: %s", created.getBody()).isEqualTo(201);
+        assertInstant(body(created).path("startsAt"), from);
+        assertInstant(body(created).path("endsAt"), to);
+        var changed = request(HttpMethod.PATCH, slotPath(user, body(created)),
+                Map.of("startsAt", from, "endsAt", to, "status", "BUSY"));
+        assertThat(changed.getStatusCode().value()).as("update at boundary: %s", changed.getBody()).isEqualTo(200);
+
+        var listed = getWindow("/users/" + user + "/slots", from, to);
+        assertThat(listed.getStatusCode().value()).isEqualTo(200);
+        assertThat(body(listed).size()).isEqualTo(1);
+        assertThat(body(listed).get(0).path("status").asText()).isEqualTo("BUSY");
+        assertInstant(body(listed).get(0).path("startsAt"), from);
+        assertInstant(body(listed).get(0).path("endsAt"), to);
+        for (String path : List.of("/users/" + user + "/availability", "/availability?userIds=" + user)) {
+            var available = getWindow(path, from, to);
+            assertThat(available.getStatusCode().value()).as("boundary query: %s", available.getBody()).isEqualTo(200);
+            assertInstant(body(available).path("from"), from);
+            assertInstant(body(available).path("to"), to);
+            assertThat(body(available).path("free").size()).isZero();
+            JsonNode busy = body(available).path("busy");
+            assertThat(busy.size()).isEqualTo(1);
+            assertInstant(busy.get(0).path("startsAt"), from);
+            assertInstant(busy.get(0).path("endsAt"), to);
+        }
+    }
+
+    private static Stream<Arguments> supportedUtcBoundaryRanges() {
+        return Stream.of(
+                Arguments.of("inclusive UTC lower bound", "0001-01-01T00:00:00Z", "0001-01-01T01:00:00Z"),
+                Arguments.of("last two supported microseconds", "9999-12-31T23:59:59.999998Z", "9999-12-31T23:59:59.999999Z"),
+                Arguments.of("local year 10000 normalizes into UTC year 9999", "+10000-01-01T00:00:00+01:00", "+10000-01-01T00:59:59.999999+01:00"));
     }
 
     @Test
@@ -113,15 +195,15 @@ class HttpContractIntegrationTest extends AbstractIntegrationTest {
         List<String> tooManyParticipants = java.util.stream.IntStream.range(0, 50)
                 .mapToObj(ignored -> UUID.randomUUID().toString()).toList();
         // The organizer counts toward the limit, even when omitted from participantIds.
-        assertError(post("/meetings", meetingBody(organizer, source, tooManyParticipants)), 400);
+        assertError(post("/meetings", meetingBody(organizer, source, tooManyParticipants)), 400, ApiErrorCode.PARTICIPANT_LIMIT_EXCEEDED);
         String tooManyUsers = String.join(",", tooManyParticipants) + "," + organizer;
-        assertError(get("/availability?userIds=" + tooManyUsers + "&from=" + at("09:00") + "&to=" + at("12:00")), 400);
+        assertError(get("/availability?userIds=" + tooManyUsers + "&from=" + at("09:00") + "&to=" + at("12:00")), 400, ApiErrorCode.BAD_REQUEST);
 
         assertError(post("/users/" + organizer + "/slots", Map.of("startsAt", "2035-07-01T00:00:00Z",
-                "endsAt", "2035-08-02T00:00:00Z", "status", "FREE")), 400);
+                "endsAt", "2035-08-02T00:00:00Z", "status", "FREE")), 400, ApiErrorCode.TIME_RANGE_TOO_LARGE);
         String oversizedRange = "?from=2035-06-01T00:00:00Z&to=2035-07-03T00:00:00Z";
-        assertError(get("/users/" + organizer + "/availability" + oversizedRange), 400);
-        assertError(get("/users/" + organizer + "/slots" + oversizedRange), 400);
+        assertError(get("/users/" + organizer + "/availability" + oversizedRange), 400, ApiErrorCode.TIME_RANGE_TOO_LARGE);
+        assertError(get("/users/" + organizer + "/slots" + oversizedRange), 400, ApiErrorCode.TIME_RANGE_TOO_LARGE);
         assertThat(get("/users/" + organizer + "/availability?from=2035-06-01T00:00:00Z&to=2035-07-02T00:00:00Z")
                 .getStatusCode().value()).isEqualTo(200);
     }
@@ -131,7 +213,7 @@ class HttpContractIntegrationTest extends AbstractIntegrationTest {
         String organizer = user();
         String participant = user();
         JsonNode source = slot(organizer, "10:00", "11:00", "FREE");
-        slot(participant, "09:00", "12:00", "FREE");
+        JsonNode covering = slot(participant, "09:00", "12:00", "FREE");
 
         JsonNode meeting = book(organizer, source, List.of(participant));
         assertThat(strings(meeting.path("participantIds"))).containsExactlyInAnyOrder(organizer, participant);
@@ -142,8 +224,11 @@ class HttpContractIntegrationTest extends AbstractIntegrationTest {
         assertIntervals(availability(participant).path("busy"), "10:00", "11:00");
         assertIntervals(availability(organizer).path("free"));
 
-        assertError(request(HttpMethod.PATCH, slotPath(organizer, source), slotBody("10:00", "11:00", "BUSY")), 409);
-        assertError(request(HttpMethod.DELETE, slotPath(organizer, source), null), 409);
+        assertError(request(HttpMethod.PATCH, slotPath(organizer, source), slotBody("10:00", "11:00", "BUSY")), 409, ApiErrorCode.SLOT_RESERVED);
+        assertError(request(HttpMethod.DELETE, slotPath(organizer, source), null), 409, ApiErrorCode.SLOT_RESERVED);
+        assertError(request(HttpMethod.PATCH, slotPath(participant, covering), slotBody("09:00", "12:00", "BUSY")),
+                409, ApiErrorCode.SLOT_RESERVED);
+        assertError(request(HttpMethod.DELETE, slotPath(participant, covering), null), 409, ApiErrorCode.SLOT_RESERVED);
     }
 
     @Test
@@ -151,11 +236,14 @@ class HttpContractIntegrationTest extends AbstractIntegrationTest {
         String organizer = user();
         String participant = user();
         JsonNode source = slot(organizer, "09:00", "11:00", "FREE");
-        slot(participant, "09:00", "10:00", "FREE");
-        slot(participant, "10:00", "11:00", "FREE");
+        JsonNode firstCovering = slot(participant, "09:00", "10:00", "FREE");
+        JsonNode secondCovering = slot(participant, "10:00", "11:00", "FREE");
 
         book(organizer, source, List.of(participant));
         assertIntervals(availability(participant).path("free"));
+        assertError(request(HttpMethod.DELETE, slotPath(participant, firstCovering), null), 409, ApiErrorCode.SLOT_RESERVED);
+        assertError(request(HttpMethod.PATCH, slotPath(participant, secondCovering), slotBody("10:00", "11:00", "BUSY")),
+                409, ApiErrorCode.SLOT_RESERVED);
         assertIntervals(availability(participant).path("busy"), "09:00", "11:00");
     }
 
@@ -167,7 +255,7 @@ class HttpContractIntegrationTest extends AbstractIntegrationTest {
         slot(participant, "09:00", "10:00", "FREE");
         slot(participant, "10:30", "11:00", "FREE");
 
-        assertError(post("/meetings", meetingBody(organizer, source, List.of(participant))), 409);
+        assertError(post("/meetings", meetingBody(organizer, source, List.of(participant))), 409, ApiErrorCode.AVAILABILITY_REQUIRED);
         assertIntervals(availability(participant).path("free"), "09:00", "10:00", "10:30", "11:00");
     }
 
@@ -195,7 +283,7 @@ class HttpContractIntegrationTest extends AbstractIntegrationTest {
         slot(freeParticipant, "09:00", "12:00", "FREE");
         slot(busyParticipant, "10:00", "11:00", "BUSY");
 
-        assertError(post("/meetings", meetingBody(organizer, source, List.of(freeParticipant, busyParticipant))), 409);
+        assertError(post("/meetings", meetingBody(organizer, source, List.of(freeParticipant, busyParticipant))), 409, ApiErrorCode.AVAILABILITY_REQUIRED);
         assertIntervals(availability(organizer).path("free"), "10:00", "11:00");
         assertIntervals(availability(freeParticipant).path("free"), "09:00", "12:00");
         book(organizer, source, List.of(freeParticipant));
@@ -206,8 +294,8 @@ class HttpContractIntegrationTest extends AbstractIntegrationTest {
         String organizer = user();
         String participant = user();
         JsonNode source = slot(organizer, "10:00", "11:00", "FREE");
-        assertError(post("/meetings", meetingBody(organizer, source, List.of(participant))), 409);
-        assertError(post("/meetings", meetingBody(organizer, source, List.of(UUID.randomUUID().toString()))), 404);
+        assertError(post("/meetings", meetingBody(organizer, source, List.of(participant))), 409, ApiErrorCode.AVAILABILITY_REQUIRED);
+        assertError(post("/meetings", meetingBody(organizer, source, List.of(UUID.randomUUID().toString()))), 404, ApiErrorCode.USER_NOT_FOUND);
         assertIntervals(availability(participant).path("free"));
         assertIntervals(availability(participant).path("busy"));
     }
@@ -281,8 +369,16 @@ class HttpContractIntegrationTest extends AbstractIntegrationTest {
     }
 
     private ResponseEntity<JsonNode> request(HttpMethod method, String path, Object body) {
+        return performRequest(MockMvcRequestBuilders.request(method, path), body);
+    }
+
+    private ResponseEntity<JsonNode> getWindow(String path, String from, String to) {
+        return performRequest(MockMvcRequestBuilders.get(path).queryParam("from", from).queryParam("to", to), null);
+    }
+
+    private ResponseEntity<JsonNode> performRequest(MockHttpServletRequestBuilder request, Object body) {
         try {
-            var request = MockMvcRequestBuilders.request(method, path).accept(MediaType.APPLICATION_JSON);
+            request.accept(MediaType.APPLICATION_JSON);
             if (body != null) {
                 request.contentType(MediaType.APPLICATION_JSON).content(objectMapper.writeValueAsString(body));
             }
@@ -293,8 +389,16 @@ class HttpContractIntegrationTest extends AbstractIntegrationTest {
                     ? null : objectMapper.readTree(response.getContentAsByteArray());
             return ResponseEntity.status(response.getStatus()).headers(headers).body(content);
         } catch (Exception exception) {
-            throw new AssertionError("HTTP request failed: " + method + " " + path, exception);
+            throw new AssertionError("HTTP request failed", exception);
         }
+    }
+
+    private void assertOnlyOriginalSlot(String user, JsonNode original) {
+        var listed = getWindow("/users/" + user + "/slots", at("08:00"), at("14:00"));
+        assertThat(listed.getStatusCode().value()).isEqualTo(200);
+        assertThat(body(listed).size()).isEqualTo(1);
+        assertThat(body(listed).get(0)).isEqualTo(original);
+        assertThat(timeSlotRepository.count()).as("a rejected command must not insert another interval").isEqualTo(1);
     }
 
     private static Map<String, Object> meetingBody(String organizer, JsonNode source, List<String> participants) {
@@ -323,11 +427,11 @@ class HttpContractIntegrationTest extends AbstractIntegrationTest {
         return response.getBody();
     }
 
-    private static void assertError(ResponseEntity<JsonNode> response, int status) {
+    private static void assertError(ResponseEntity<JsonNode> response, int status, ApiErrorCode code) {
         assertThat(response.getStatusCode().value()).as("error response: %s", response.getBody()).isEqualTo(status);
         assertThat(response.getHeaders().getContentType()).isEqualTo(MediaType.APPLICATION_JSON);
         assertThat(body(response).path("status").asInt()).isEqualTo(status);
-        assertThat(body(response).path("code").asText()).isNotBlank();
+        assertThat(body(response).path("code").asText()).isEqualTo(code.name());
         assertThat(body(response).path("message").asText()).isNotBlank();
         assertThat(body(response).path("details").path("path").asText()).startsWith("/");
     }
