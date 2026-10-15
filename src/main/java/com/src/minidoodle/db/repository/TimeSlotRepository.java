@@ -1,6 +1,7 @@
 package com.src.minidoodle.db.repository;
 
 import com.src.minidoodle.db.model.TimeSlot;
+import com.src.minidoodle.db.repository.projection.SlotAvailabilityView;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -11,6 +12,19 @@ import java.util.List;
 import java.util.UUID;
 
 public interface TimeSlotRepository extends JpaRepository<TimeSlot, UUID> {
+
+    /** Reads committed availability after coordination locks, even when entities were preloaded. */
+    @Query(value = """
+            select calendar_id as "calendarId", starts_at as "startsAt", ends_at as "endsAt"
+            from time_slots
+            where calendar_id in (:calendarIds)
+              and status = 'FREE'
+              and tstzrange(starts_at, ends_at, '[)') && tstzrange(:from, :to, '[)')
+            order by calendar_id, starts_at, id
+            """, nativeQuery = true)
+    List<SlotAvailabilityView> findFreeAvailability(@Param("calendarIds") Collection<UUID> calendarIds,
+                                                  @Param("from") Instant from, @Param("to") Instant to);
+
     @Query(value = """
             SELECT * FROM time_slots
             WHERE calendar_id = :calendarId

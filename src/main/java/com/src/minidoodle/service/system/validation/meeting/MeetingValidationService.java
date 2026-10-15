@@ -1,11 +1,10 @@
 package com.src.minidoodle.service.system.validation.meeting;
 
-import com.src.minidoodle.db.model.TimeSlot;
 import com.src.minidoodle.db.repository.MeetingReservationRepository;
 import com.src.minidoodle.db.repository.TimeSlotRepository;
+import com.src.minidoodle.db.repository.projection.SlotAvailabilityView;
 import com.src.minidoodle.dto.request.CreateMeetingRequest;
 import com.src.minidoodle.enums.ApiErrorCode;
-import com.src.minidoodle.enums.SlotStatus;
 import com.src.minidoodle.exception.ApiException;
 import com.src.minidoodle.service.availability.model.TimeInterval;
 import com.src.minidoodle.util.TimeIntervalUtils;
@@ -48,10 +47,9 @@ public class MeetingValidationService {
     public void validateAvailability(List<UUID> calendarIds, Instant from, Instant to) {
         Map<UUID, List<TimeInterval>> freeByCalendar = new HashMap<>();
         calendarIds.forEach(id -> freeByCalendar.put(id, new ArrayList<>()));
-        for (TimeSlot slot : timeSlotRepository.findOverlapping(calendarIds, from, to)) {
-            if (slot.getStatus() == SlotStatus.FREE) {
-                freeByCalendar.get(slot.getCalendar().getId()).add(new TimeInterval(slot.getStartsAt(), slot.getEndsAt()));
-            }
+        // Scalar projections bypass stale managed slots without one refresh query per interval.
+        for (SlotAvailabilityView slot : timeSlotRepository.findFreeAvailability(calendarIds, from, to)) {
+            freeByCalendar.get(slot.getCalendarId()).add(new TimeInterval(slot.getStartsAt(), slot.getEndsAt()));
         }
         for (List<TimeInterval> free : freeByCalendar.values()) {
             boolean covered = TimeIntervalUtils.merge(free).stream()

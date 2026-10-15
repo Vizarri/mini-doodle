@@ -15,6 +15,8 @@ import com.src.minidoodle.enums.SlotStatus;
 import com.src.minidoodle.exception.ApiException;
 import com.src.minidoodle.service.system.CalendarLockService;
 import com.src.minidoodle.service.system.validation.meeting.MeetingValidationService;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.EntityNotFoundException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -36,16 +38,22 @@ public class MeetingService {
     private final UserRepository userRepository;
     private final CalendarLockService calendarLockService;
     private final MeetingValidationService meetingValidationService;
+    private final EntityManager entityManager;
 
     @Transactional
     public MeetingResponse create(CreateMeetingRequest request) {
         List<UUID> participantIds = meetingValidationService.normalizeParticipants(request);
         Map<UUID, UUID> calendars = calendarLockService.lockUsers(participantIds);
-        // Load mutable source state only after obtaining all coordination locks.
-        TimeSlot source = timeSlotRepository.findById(request.slotId())
-                .filter(slot -> slot.getCalendar().getId().equals(calendars.get(request.organizerId())))
-                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.SLOT_NOT_FOUND,
-                        "Source slot was not found in the organizer's calendar"));
+        TimeSlot source = timeSlotRepository.findById(request.slotId()).orElseThrow(this::sourceSlotNotFound);
+        // REQUIRED may join an outer transaction with a source cached before acquiring the locks.
+        try {
+            entityManager.refresh(source);
+        } catch (EntityNotFoundException exception) {
+            throw sourceSlotNotFound();
+        }
+        if (!source.getCalendar().getId().equals(calendars.get(request.organizerId()))) {
+            throw sourceSlotNotFound();
+        }
         if (source.getStatus() != SlotStatus.FREE) {
             throw new ApiException(HttpStatus.CONFLICT, ApiErrorCode.MEETING_CONFLICT, "The source slot must be free");
         }
@@ -82,9 +90,16 @@ public class MeetingService {
         calendarLockService.lockUsers(participantIds);
         Meeting meeting = meetingRepository.findLockedById(meetingId)
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.MEETING_NOT_FOUND, "Meeting not found"));
+        // A locking query does not replace state already loaded by an outer REQUIRED transaction.
+        entityManager.refresh(meeting);
         if (meeting.getCancelledAt() != null) return;
         meetingReservationRepository.deleteByIdMeetingId(meetingId);
         meeting.setCancelledAt(Instant.now());
+    }
+
+    private ApiException sourceSlotNotFound() {
+        return new ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.SLOT_NOT_FOUND,
+                "Source slot was not found in the organizer's calendar");
     }
 
     private List<UUID> getParticipantIds(UUID meetingId) {

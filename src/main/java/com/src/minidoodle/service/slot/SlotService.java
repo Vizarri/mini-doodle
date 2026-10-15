@@ -10,6 +10,8 @@ import com.src.minidoodle.exception.ApiException;
 import com.src.minidoodle.service.system.CalendarLockService;
 import com.src.minidoodle.service.system.validation.slot.SlotValidationService;
 import com.src.minidoodle.service.system.validation.slot.ValidatedSlot;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.EntityNotFoundException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -26,6 +28,7 @@ public class SlotService {
     private final CalendarRepository calendarRepository;
     private final TimeSlotRepository timeSlotRepository;
     private final SlotValidationService slotValidationService;
+    private final EntityManager entityManager;
 
     @Transactional
     public SlotResponse create(UUID userId, SlotUpsertRequest request) {
@@ -67,9 +70,21 @@ public class SlotService {
     }
 
     private TimeSlot getOwnedSlot(UUID calendarId, UUID slotId) {
-        return timeSlotRepository.findById(slotId).filter(slot -> slot.getCalendar().getId().equals(calendarId))
-                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.SLOT_NOT_FOUND,
-                        "Slot not found for this user"));
+        TimeSlot slot = timeSlotRepository.findById(slotId).orElseThrow(this::slotNotFound);
+        // REQUIRED may join a transaction that loaded this slot before the calendar lock.
+        try {
+            entityManager.refresh(slot);
+        } catch (EntityNotFoundException exception) {
+            throw slotNotFound();
+        }
+        if (!slot.getCalendar().getId().equals(calendarId)) {
+            throw slotNotFound();
+        }
+        return slot;
+    }
+
+    private ApiException slotNotFound() {
+        return new ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.SLOT_NOT_FOUND, "Slot not found for this user");
     }
 
     private void apply(TimeSlot slot, ValidatedSlot validated) {

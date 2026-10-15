@@ -140,7 +140,7 @@ The availability response before cancellation has no free intervals and one busy
 
 Six tables separate user identity, declared availability and meeting history: `users`, `calendars`, `time_slots`, `meetings`, `meeting_participants` and `meeting_reservations`.
 
-Every scheduling mutation first obtains the affected calendar locks in database UUID order. The native query uses `FOR NO KEY UPDATE`: writers serialize while child foreign-key checks do not require a conflicting key lock. Mutable slot and meeting state is read after obtaining the locks. Booking validates all participants and inserts all reservations in one transaction. Cancellation obtains its meeting-row lock after its calendar locks. This works across multiple application instances sharing PostgreSQL.
+Every scheduling mutation first obtains the affected calendar locks in database UUID order. The native query uses `FOR NO KEY UPDATE`: writers serialize while child foreign-key checks do not require a conflicting key lock. Mutable slot and meeting state is refreshed after obtaining the locks, so a joined transaction cannot reuse stale managed entities. Participant coverage uses a single native scalar projection to read current values without fetching each slot separately. Booking validates all participants and inserts all reservations in one transaction. Cancellation obtains its meeting-row lock after its calendar locks. This works across multiple application instances sharing PostgreSQL.
 
 Exclusion constraints on `(calendar_id, tstzrange(starts_at, ends_at, '[)'))` reject overlapping slots and reservations. Native overlap queries use the same range expression, allowing PostgreSQL to use the GiST indexes. List pagination is applied in the database.
 
@@ -168,6 +168,7 @@ The integration suite covers:
 
 - HTTP contracts through MockMvc: DTO validation, stable error codes, slot CRUD, booking, cancellation and availability.
 - Transactional concurrency with actual PostgreSQL lock contention, including conflicts between bookings, slot changes and cancellation.
+- Existing persistence contexts containing stale slots: committed state changes and deletions must be observed before booking or deleting a reserved slot.
 - A fixture of 200 users and 5,000 slots: exact personal/shared availability and a bounded SQL query count for one and 50 users.
 - Booking, availability and cancellation with a connection pool of size one.
 - OpenAPI paths, status codes, content types and schemas. The test writes the generated contract to `target/openapi/openapi.json`.
