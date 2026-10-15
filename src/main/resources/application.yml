@@ -14,17 +14,17 @@ spring:
     hibernate:
       ddl-auto: validate
     properties:
-      hibernate.jdbc.time_zone: UTC
-      hibernate.jdbc.batch_size: 50
-      hibernate.order_inserts: true
+      hibernate:
+        jdbc:
+          time_zone: UTC
+          batch_size: 50
+        order_inserts: true
   flyway:
     enabled: true
+    locations: classpath:db/migration/schema
   jackson:
     deserialization:
       fail-on-unknown-properties: true
-  mvc:
-    problemdetails:
-      enabled: true
 
 server:
   shutdown: graceful

@@ -9,7 +9,7 @@
         <version>3.5.3</version>
         <relativePath/>
     </parent>
-    <groupId>dev.minidoodle</groupId>
+    <groupId>com.src</groupId>
     <artifactId>mini-doodle</artifactId>
     <version>0.0.1-SNAPSHOT</version>
     <name>Mini Doodle</name>
@@ -17,7 +17,7 @@
     <properties>
         <java.version>21</java.version>
         <springdoc.version>2.8.8</springdoc.version>
-        <excludedGroups>integration</excludedGroups>
+        <openapi.output.file>${project.build.directory}/openapi/openapi.json</openapi.output.file>
     </properties>
     <dependencies>
         <dependency>
@@ -102,17 +102,11 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
                 <configuration>
-                    <excludedGroups>${excludedGroups}</excludedGroups>
+                    <systemPropertyVariables>
+                        <openapi.output.file>${openapi.output.file}</openapi.output.file>
+                    </systemPropertyVariables>
                 </configuration>
             </plugin>
         </plugins>
     </build>
-    <profiles>
-        <profile>
-            <id>integration</id>
-            <properties>
-                <excludedGroups/>
-            </properties>
-        </profile>
-    </profiles>
 </project>
