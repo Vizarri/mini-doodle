@@ -33,7 +33,7 @@ The named PostgreSQL volume survives `down` and restarts. `docker compose down -
 
 ## Project organization
 
-The project separates HTTP contracts, application logic and persistence into layers:
+HTTP contracts, application logic and persistence have separate layers:
 
 ```text
 com.src.minidoodle
@@ -72,7 +72,9 @@ Controllers depend on services and standalone DTOs. Transactional services coord
 - Cancellation releases reservations but retains meeting details and participants. Repeated cancellation is harmless, including after another meeting has booked the released time. Deleting a cancelled meeting's former source slot makes its `slotId` null.
 - Personal availability clips and merges intervals. Shared availability intersects free time and unions busy time across the selected users.
 
-Use ISO 8601 timestamps with an explicit offset, such as `2030-01-15T10:00:00Z` or `2030-01-15T11:00:00+01:00`. Numeric epochs and offset-free timestamps are rejected. Storage uses `Instant` / `timestamptz`; responses use UTC. Precision finer than microseconds is rejected. A user's validated `ZoneId` is for presentation and does not alter explicit timestamps.
+Use ISO 8601 timestamps with an explicit offset, such as `2030-01-15T10:00:00Z` or `2030-01-15T11:00:00+01:00`. Numeric epochs and offset-free timestamps are rejected. Storage uses `Instant` / `timestamptz`; responses use UTC. After offset normalization, both boundaries must satisfy `0001-01-01T00:00:00Z <= timestamp < +10000-01-01T00:00:00Z`. Precision finer than microseconds is rejected. A user's validated `ZoneId` is for presentation and does not alter explicit timestamps.
+
+Slot status accepts only the JSON strings `"FREE"` and `"BUSY"`. Numeric enum values, different casing and unknown strings are rejected.
 
 Slots and query windows are limited to 31 days. Meetings support 50 participants including the organizer; shared queries accept 50 user IDs. Slot listing defaults to 100 items, permits 500, and accepts offsets from 0 to 100000.
 
@@ -94,7 +96,7 @@ Slots and query windows are limited to 31 days. Meetings support 50 participants
 
 Successful creation returns `201` and `Location`; deletion/cancellation returns `204`. Slot listing returns complete stored intervals; availability results are clipped to the query window. Unknown JSON fields are rejected.
 
-Errors have a stable contract and use `application/json`:
+Errors have stable machine-readable codes and use `application/json`:
 
 ```json
 {
@@ -138,19 +140,21 @@ The availability response before cancellation has no free intervals and one busy
 
 ## Persistence and concurrency
 
-Six tables separate user identity, declared availability and meeting history: `users`, `calendars`, `time_slots`, `meetings`, `meeting_participants` and `meeting_reservations`.
+Six tables separate user identity, declared availability and meeting history: `users`, `calendars`, `time_slots`, `meetings`, `meeting_participants` and `meeting_reservations`. Spring Data JPA handles ordinary entity persistence; native queries provide PostgreSQL range operators and precise row-lock behavior.
 
-Every scheduling mutation first obtains the affected calendar locks in database UUID order. The native query uses `FOR NO KEY UPDATE`: writers serialize while child foreign-key checks do not require a conflicting key lock. Mutable slot and meeting state is refreshed after obtaining the locks, so a joined transaction cannot reuse stale managed entities. Participant coverage uses a single native scalar projection to read current values without fetching each slot separately. Booking validates all participants and inserts all reservations in one transaction. Cancellation obtains its meeting-row lock after its calendar locks. This works across multiple application instances sharing PostgreSQL.
+Separating declared slots from reservations preserves the original availability when a meeting occupies only part of a participant's slot. Cancellation removes reservations without reconstructing slots. The tradeoff is computing effective free and busy intervals when reading availability.
+
+Every scheduling mutation first obtains the affected calendar locks in database UUID order. The native query uses `FOR NO KEY UPDATE`: writes to the same calendar serialize, while child foreign-key checks remain compatible and unrelated calendars can proceed independently. Mutable slot and meeting state is refreshed after obtaining the locks, so a joined transaction cannot reuse stale managed entities. Participant coverage uses a single native scalar projection to read current values without fetching each slot separately. Booking validates all participants and inserts all reservations in one transaction. Cancellation obtains its meeting-row lock after its calendar locks. This works across multiple application instances sharing PostgreSQL.
 
 Exclusion constraints on `(calendar_id, tstzrange(starts_at, ends_at, '[)'))` reject overlapping slots and reservations. Native overlap queries use the same range expression, allowing PostgreSQL to use the GiST indexes. List pagination is applied in the database.
 
 Availability performs three bulk reads: calendars, slots and reservations. A repeatable-read transaction gives those reads one coherent snapshot. Reading entity IDs through lazy associations avoids fetching unrelated user/entity graphs. Interval processing merges ranges and subtracts or intersects them; it does not generate per-minute rows.
 
-New UUID entities use their lifecycle callbacks. Known-new composite participation/reservation rows use targeted native repository inserts, avoiding per-row merge existence checks. Neither an additional cache nor a message broker is required.
+New UUID entities use their lifecycle callbacks. Known-new composite participation/reservation rows use targeted native repository inserts, avoiding per-row merge existence checks.
 
 ## Tests
 
-Install Java 21+, Maven 3.9+ and run Docker:
+Install Java 21, Maven 3.9+ and run Docker:
 
 ```sh
 mvn verify
@@ -166,19 +170,18 @@ mvn -Dtest=TimeIntervalUtilsTest test
 
 The integration suite covers:
 
-- HTTP contracts through MockMvc: DTO validation, stable error codes, slot CRUD, booking, cancellation and availability.
-- Transactional concurrency with actual PostgreSQL lock contention, including conflicts between bookings, slot changes and cancellation.
+- HTTP contracts through MockMvc: DTO validation, specific error codes, timestamp/status boundaries, slot CRUD, booking, cancellation and availability.
+- Transactional concurrency with actual PostgreSQL lock contention, including both orderings of booking versus participant slot changes, competing bookings and cancellation.
+- Booking and cancellation with 50 participants, preserving declared slots and meeting history.
 - Existing persistence contexts containing stale slots: committed state changes and deletions must be observed before booking or deleting a reserved slot.
 - A fixture of 200 users and 5,000 slots: exact personal/shared availability and a bounded SQL query count for one and 50 users.
 - Booking, availability and cancellation with a connection pool of size one.
 - OpenAPI paths, status codes, content types and schemas. The test writes the generated contract to `target/openapi/openapi.json`.
 
-Scale tests assert correctness and database access bounds, not machine-dependent latency thresholds. They are part of the Java test suite and require no external benchmark script. The Docker image build skips tests; `mvn verify` is the verification command before handoff.
+Scale tests assert correctness and database access bounds, not machine-dependent latency thresholds. They are part of the Java test suite and require no external benchmark script. The Docker image build skips tests; `mvn verify` runs the complete verification suite.
 
 ## Observability and scope
 
 Actuator exposes health/readiness/liveness and Prometheus-format HTTP, JVM and connection-pool metrics.
 
 This is a trusted simulation without authentication/authorization. It omits recurring schedules, rescheduling, invitations/acceptance, notifications and external calendar integrations. Creation has no idempotency key: a conflicting retry returns `409`; cancellation is idempotent. Availability output size follows the resulting intervals within the bounded query window and is not paginated.
-
-The project uses layered validation/error contracts, JPA practices, coordination locks and integration tests. Its scheduling domain remains specific to this challenge. The repository is local until a remote is configured for sharing with reviewers.
