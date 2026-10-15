@@ -24,6 +24,8 @@ APP_PORT=18080 DB_PORT=15432 docker compose up --build -d --wait
 
 The local database, username and password are `minidoodle`. When running outside Compose, set `DB_URL`, `DB_USERNAME` and `DB_PASSWORD` as needed.
 
+Database lock acquisition waits are limited to `5s` by default. Override `DB_LOCK_TIMEOUT`, for example `DB_LOCK_TIMEOUT=2s docker compose up --build -d --wait`. The application initializes PostgreSQL `lock_timeout` on every pooled connection. This is separate from the Hikari timeout for obtaining a connection from the pool.
+
 ```sh
 docker compose logs -f app
 docker compose down
@@ -146,6 +148,8 @@ Separating declared slots from reservations preserves the original availability 
 
 Every scheduling mutation first obtains the affected calendar locks in database UUID order. The native query uses `FOR NO KEY UPDATE`: writes to the same calendar serialize, while child foreign-key checks remain compatible and unrelated calendars can proceed independently. Mutable slot and meeting state is refreshed after obtaining the locks, so a joined transaction cannot reuse stale managed entities. Participant coverage uses a single native scalar projection to read current values without fetching each slot separately. Booking validates all participants and inserts all reservations in one transaction. Cancellation uses the same participant calendar locks to serialize repeated requests and preserve newer reservations. This works across multiple application instances sharing PostgreSQL.
 
+A lock wait exceeding `DB_LOCK_TIMEOUT` aborts the statement and rolls back the request transaction. The API returns `409 CONCURRENT_MODIFICATION`; the client can retry the complete request. PostgreSQL applies the limit to each lock acquisition attempt, rather than to the total request duration.
+
 Exclusion constraints on `(calendar_id, tstzrange(starts_at, ends_at, '[)'))` reject overlapping slots and reservations. Native overlap queries use the same range expression, allowing PostgreSQL to use the GiST indexes. List pagination is applied in the database.
 
 Availability performs three bulk reads: calendars, slots and reservations. A repeatable-read transaction gives those reads one coherent snapshot. Reading entity IDs through lazy associations avoids fetching unrelated user/entity graphs. Interval processing merges ranges and subtracts or intersects them; it does not generate per-minute rows.
@@ -176,6 +180,8 @@ The integration suite covers:
 
 - HTTP contracts through MockMvc: DTO validation and exact input limits, error envelopes for binding and protocol failures, timestamp/status boundaries, slot CRUD, booking, cancellation and availability.
 - Transactional concurrency with actual PostgreSQL lock contention, including both orderings of booking versus participant slot changes, competing bookings and cancellation.
+- Separate application JVMs sharing PostgreSQL: real HTTP requests across both instances verify cross-process booking and cancellation.
+- Session lock timeout configuration, a real blocked HTTP request, the conflict response, rollback and a successful retry after lock release.
 - Booking and cancellation with 50 participants, preserving declared slots and meeting history.
 - Ownership checks, participant deduplication, persisted pagination and rollback after actual SQL failures during user/calendar and meeting/reservation creation.
 - PostgreSQL exclusion constraints tested directly through repositories, bypassing service guards: overlap is rejected; adjacency and independent calendars are allowed.
@@ -185,7 +191,17 @@ The integration suite covers:
 - Booking, availability and cancellation with a connection pool of size one.
 - OpenAPI paths, status codes, content types and schemas. The test writes the generated contract to `target/openapi/openapi.json`.
 
-Scale tests assert correctness and database access bounds, not machine-dependent latency thresholds. They are part of the Java test suite and require no external benchmark script. The Docker image build skips tests; `mvn verify` runs the complete verification suite.
+The multi-instance tests start two separate Java processes from the compiled test/runtime classpath, each with its own HTTP port and connection pool, against the same Testcontainers PostgreSQL. They stop both processes after each test class; their logs remain under `target/multi-instance/` for diagnosis. No previously running application or packaged JAR is required.
+
+The load test uses 200 users and 5,000 declared slots, 16 concurrent workers and a mixed HTTP workload across both processes. It exercises independent bookings, meeting and availability reads, cancellation and repeated cancellation, followed by competing requests for the same time. Assertions check response codes, membership, reservations, restored availability and the absence of overlapping reservations. Measurements are written to `target/load-test-results.json`.
+
+Run these checks separately with Docker running:
+
+```sh
+mvn -Dtest=MeetingMultiInstanceIntegrationTest,MeetingLoadIntegrationTest,CalendarLockTimeoutIntegrationTest test
+```
+
+Scale and load tests assert correctness and completion within generous test deadlines. Throughput and latency measurements describe the local test run; they are not hardware-independent capacity or SLA guarantees. The tests are part of the Java suite and require no external benchmark script. The Docker image build skips tests; `mvn verify` runs the complete verification suite.
 
 ## Observability and scope
 
