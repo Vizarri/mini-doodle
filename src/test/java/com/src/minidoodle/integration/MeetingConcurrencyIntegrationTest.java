@@ -1,9 +1,12 @@
 package com.src.minidoodle.integration;
 
+import com.src.minidoodle.dto.response.SlotResponse;
+import com.src.minidoodle.dto.response.TimeIntervalResponse;
 import com.src.minidoodle.enums.ApiErrorCode;
 import com.src.minidoodle.enums.MeetingStatus;
 import com.src.minidoodle.enums.SlotStatus;
 import com.src.minidoodle.exception.ApiException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
@@ -13,6 +16,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.LockSupport;
 import java.util.function.Supplier;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.http.HttpStatus;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -56,6 +61,82 @@ class MeetingConcurrencyIntegrationTest extends AbstractIntegrationTest {
         assertThat(meetingReservationRepository.count()).isZero();
         assertThat(slotService.list(participant.id(), instant("08:00"), instant("13:00"), 100, 0))
                 .singleElement().satisfies(slot -> assertThat(slot.status()).isEqualTo(SlotStatus.BUSY));
+    }
+
+    @ParameterizedTest(name = "{0} waits for booking, then preserves the reserved participant slot")
+    @EnumSource(ParticipantSlotMutation.class)
+    void participantSlotMutationRejectsTheWinningBookingsReservation(ParticipantSlotMutation mutation) throws Exception {
+        var organizer = createUser();
+        var participant = createUser();
+        var source = createSlot(organizer.id(), "10:00", "11:00", SlotStatus.FREE);
+        // UPDATE covers a longer slot; DELETE covers one part of adjacent availability.
+        List<SlotResponse> participantSlots = mutation == ParticipantSlotMutation.UPDATE
+                ? List.of(createSlot(participant.id(), "09:00", "12:00", SlotStatus.FREE))
+                : List.of(createSlot(participant.id(), "09:00", "10:30", SlotStatus.FREE),
+                          createSlot(participant.id(), "10:30", "12:00", SlotStatus.FREE));
+        var target = participantSlots.getFirst();
+
+        var race = withBlockedContender(
+                () -> createMeeting(organizer.id(), source.id(), List.of(participant.id())),
+                () -> {
+                    if (mutation == ParticipantSlotMutation.UPDATE) {
+                        slotService.update(participant.id(), target.id(), slotRequest("09:00", "12:00", SlotStatus.BUSY));
+                    } else {
+                        slotService.delete(participant.id(), target.id());
+                    }
+                    return null;
+                });
+
+        assertConflict(race.contender(), ApiErrorCode.SLOT_RESERVED);
+        assertThat(meetingService.get(race.holder().id()).status()).isEqualTo(MeetingStatus.ACTIVE);
+        assertThat(meetingRepository.count()).isEqualTo(1);
+        assertThat(meetingParticipantRepository.count()).isEqualTo(2);
+        assertThat(meetingReservationRepository.count()).isEqualTo(2);
+        assertThat(slotService.list(participant.id(), instant("08:00"), instant("13:00"), 100, 0))
+                .containsExactlyElementsOf(participantSlots);
+        var availability = availabilityService.personal(participant.id(), instant("08:00"), instant("13:00"));
+        assertThat(availability.free()).containsExactly(
+                new TimeIntervalResponse(instant("09:00"), instant("10:00")),
+                new TimeIntervalResponse(instant("11:00"), instant("12:00")));
+        assertThat(availability.busy()).containsExactly(new TimeIntervalResponse(instant("10:00"), instant("11:00")));
+    }
+
+    @Test
+    void fiftyParticipantsCanBookAndCancelWithoutLosingAvailabilityOrMembership() {
+        var organizer = createUser();
+        var source = createSlot(organizer.id(), "10:00", "11:00", SlotStatus.FREE);
+        List<UUID> participants = new ArrayList<>();
+        for (int i = 0; i < 49; i++) {
+            var participant = createUser();
+            createSlot(participant.id(), "09:00", "12:00", SlotStatus.FREE);
+            participants.add(participant.id());
+        }
+        List<UUID> everyone = new ArrayList<>(participants);
+        everyone.add(organizer.id());
+
+        var meeting = createMeeting(organizer.id(), source.id(), participants);
+
+        assertThat(meeting.participantIds()).containsExactlyInAnyOrderElementsOf(everyone);
+        assertThat(meeting.status()).isEqualTo(MeetingStatus.ACTIVE);
+        assertThat(meetingRepository.count()).isEqualTo(1);
+        assertThat(meetingParticipantRepository.count()).isEqualTo(50);
+        assertThat(meetingReservationRepository.count()).isEqualTo(50);
+        var occupied = availabilityService.common(everyone, instant("08:00"), instant("13:00"));
+        assertThat(occupied.free()).isEmpty();
+        assertThat(occupied.busy()).containsExactly(new TimeIntervalResponse(instant("10:00"), instant("11:00")));
+
+        meetingService.cancel(meeting.id());
+
+        var cancelled = meetingService.get(meeting.id());
+        assertThat(cancelled.status()).isEqualTo(MeetingStatus.CANCELLED);
+        assertThat(cancelled.participantIds()).containsExactlyInAnyOrderElementsOf(everyone);
+        assertThat(meetingRepository.count()).isEqualTo(1);
+        assertThat(meetingParticipantRepository.count()).isEqualTo(50);
+        assertThat(meetingReservationRepository.count()).isZero();
+        assertThat(timeSlotRepository.count()).isEqualTo(50);
+        var restored = availabilityService.common(everyone, instant("08:00"), instant("13:00"));
+        assertThat(restored.free()).containsExactly(new TimeIntervalResponse(instant("10:00"), instant("11:00")));
+        assertThat(restored.busy()).isEmpty();
     }
 
     @Test
@@ -160,6 +241,8 @@ class MeetingConcurrencyIntegrationTest extends AbstractIntegrationTest {
     private static void cancelIfRunning(Future<?> future) {
         if (future != null && !future.isDone()) future.cancel(true);
     }
+
+    enum ParticipantSlotMutation { UPDATE, DELETE }
 
     private record Outcome<T>(T value, RuntimeException failure) { }
     private record RaceResult<T, U>(T holder, Outcome<U> contender) { }
