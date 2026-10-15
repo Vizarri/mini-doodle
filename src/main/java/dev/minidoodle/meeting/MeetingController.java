@@ -1,5 +1,6 @@
 package dev.minidoodle.meeting;
 
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -26,6 +27,7 @@ public class MeetingController {
     }
 
     @PostMapping
+    @ApiResponse(responseCode = "201", description = "Created")
     public ResponseEntity<MeetingView> create(@Valid @RequestBody CreateMeeting request) {
         MeetingView meeting = service.create(request);
         return ResponseEntity.created(URI.create("/meetings/" + meeting.id())).body(meeting);
@@ -37,6 +39,7 @@ public class MeetingController {
     }
 
     @DeleteMapping("/{meetingId}")
+    @ApiResponse(responseCode = "204", description = "Meeting cancelled")
     public ResponseEntity<Void> cancel(@PathVariable UUID meetingId) {
         service.cancel(meetingId);
         return ResponseEntity.noContent().build();

@@ -1,5 +1,6 @@
 package dev.minidoodle.user;
 
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
@@ -17,6 +18,7 @@ public class UserController {
     public UserController(UserService service) { this.service = service; }
 
     @PostMapping
+    @ApiResponse(responseCode = "201", description = "Created")
     ResponseEntity<UserResponse> create(@Valid @RequestBody CreateUser request) {
         UserResponse user = service.create(request);
         return ResponseEntity.created(URI.create("/users/" + user.id())).body(user);

@@ -1,5 +1,6 @@
 package dev.minidoodle.slot;
 
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
 import dev.minidoodle.common.StrictOffsetDateTimeDeserializer;
 
@@ -26,6 +27,7 @@ public class SlotController {
     public SlotController(SlotService service) { this.service = service; }
 
     @PostMapping
+    @ApiResponse(responseCode = "201", description = "Created")
     ResponseEntity<SlotResponse> create(@PathVariable UUID userId, @Valid @RequestBody SlotRequest request) {
         SlotResponse slot = service.create(userId, request);
         return ResponseEntity.created(URI.create("/users/" + userId + "/slots/" + slot.id())).body(slot);
@@ -47,6 +49,7 @@ public class SlotController {
     }
 
     @DeleteMapping("/{slotId}")
+    @ApiResponse(responseCode = "204", description = "Slot deleted")
     ResponseEntity<Void> delete(@PathVariable UUID userId, @PathVariable UUID slotId) {
         service.delete(userId, slotId);
         return ResponseEntity.noContent().build();
