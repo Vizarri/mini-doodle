@@ -34,7 +34,7 @@ public interface CalendarRepository extends JpaRepository<Calendar, UUID> {
     List<Calendar> findByUserIdIn(@Param("userIds") Collection<UUID> userIds);
 
     /**
-     * Locks calendars in identifier order to serialize schedule mutations without deadlocks.
+     * Locks calendars in identifier order so concurrent schedule mutations acquire rows consistently.
      * The caller must hold a transaction and acquire these locks before reading mutable schedule state.
      * PostgreSQL {@code FOR NO KEY UPDATE} allows child-row foreign-key checks to proceed;
      * calendar identifiers and ownership are immutable. Locks remain held until transaction completion.
