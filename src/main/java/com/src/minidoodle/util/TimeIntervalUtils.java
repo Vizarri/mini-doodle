@@ -8,25 +8,45 @@ import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
 
+/**
+ * Set operations on immutable half-open intervals. Inputs may be unordered and overlapping;
+ * normalization merges both overlap and adjacency without modifying the supplied collections.
+ * Results contain ordered, nonempty intervals and never introduce undeclared time.
+ */
 public final class TimeIntervalUtils {
     private TimeIntervalUtils() {
     }
 
+    /**
+     * Sorts intervals by start and end, then extends the current range while the next range overlaps or touches it.
+     * Sorting costs {@code O(n log n)} and the merge pass is linear in the number of input intervals.
+     *
+     * @param intervals non-null collection of valid intervals in any order
+     * @return immutable ordered ranges with no overlap or adjacent boundaries
+     */
     public static List<TimeInterval> merge(Collection<TimeInterval> intervals) {
-        List<TimeInterval> sorted = intervals.stream()
-                .sorted(Comparator.comparing(TimeInterval::startsAt).thenComparing(TimeInterval::endsAt)).toList();
+        List<TimeInterval> sorted = intervals.stream().sorted(Comparator.comparing(TimeInterval::startsAt).thenComparing(TimeInterval::endsAt)).toList();
         List<TimeInterval> merged = new ArrayList<>();
         for (TimeInterval next : sorted) {
             if (merged.isEmpty() || next.startsAt().isAfter(merged.getLast().endsAt())) {
                 merged.add(next);
             } else {
                 TimeInterval previous = merged.removeLast();
-                merged.add(new TimeInterval(previous.startsAt(), max(previous.endsAt(), next.endsAt())));
+                merged.add(TimeInterval.builder().startsAt(previous.startsAt()).endsAt(max(previous.endsAt(), next.endsAt())).build());
             }
         }
         return List.copyOf(merged);
     }
 
+    /**
+     * Removes occupied time from available time after normalizing both collections.
+     * A cursor emits only uncovered fragments while advancing past relevant blockers; blockers ending at a
+     * free interval's start or beginning at its end do not intersect it. The scan is linear after sorting.
+     *
+     * @param available declared or otherwise established free intervals
+     * @param occupied intervals to remove, including those crossing availability boundaries
+     * @return immutable remaining free fragments in chronological order
+     */
     public static List<TimeInterval> subtract(Collection<TimeInterval> available, Collection<TimeInterval> occupied) {
         List<TimeInterval> free = merge(available);
         List<TimeInterval> busy = merge(occupied);
@@ -40,7 +60,7 @@ public final class TimeIntervalUtils {
             for (int i = firstRelevant; i < busy.size() && busy.get(i).startsAt().isBefore(source.endsAt()); i++) {
                 TimeInterval blocker = busy.get(i);
                 if (blocker.startsAt().isAfter(cursor)) {
-                    result.add(new TimeInterval(cursor, blocker.startsAt()));
+                    result.add(TimeInterval.builder().startsAt(cursor).endsAt(blocker.startsAt()).build());
                 }
                 cursor = max(cursor, blocker.endsAt());
                 if (!cursor.isBefore(source.endsAt())) {
@@ -48,12 +68,20 @@ public final class TimeIntervalUtils {
                 }
             }
             if (cursor.isBefore(source.endsAt())) {
-                result.add(new TimeInterval(cursor, source.endsAt()));
+                result.add(TimeInterval.builder().startsAt(cursor).endsAt(source.endsAt()).build());
             }
         }
         return List.copyOf(result);
     }
 
+    /**
+     * Finds common time with a two-pointer scan over normalized inputs, advancing whichever interval ends first.
+     * Equal start/end boundaries yield no interval because half-open intervals must have positive duration.
+     *
+     * @param left first collection of available intervals
+     * @param right second collection of available intervals
+     * @return immutable chronological intersection, empty when either input has no common time
+     */
     public static List<TimeInterval> intersect(Collection<TimeInterval> left, Collection<TimeInterval> right) {
         List<TimeInterval> a = merge(left);
         List<TimeInterval> b = merge(right);
@@ -64,7 +92,7 @@ public final class TimeIntervalUtils {
             Instant start = max(a.get(i).startsAt(), b.get(j).startsAt());
             Instant end = min(a.get(i).endsAt(), b.get(j).endsAt());
             if (start.isBefore(end)) {
-                result.add(new TimeInterval(start, end));
+                result.add(TimeInterval.builder().startsAt(start).endsAt(end).build());
             }
             if (a.get(i).endsAt().isBefore(b.get(j).endsAt())) {
                 i++;

@@ -81,7 +81,7 @@ public abstract class AbstractIntegrationTest {
     }
 
     protected UserResponse createUser() {
-        return userService.create(new CreateUserRequest("Integration user", UUID.randomUUID() + "@example.com", "UTC"));
+        return userService.create(CreateUserRequest.builder().name("Integration user").email(UUID.randomUUID() + "@example.com").timeZone("UTC").build());
     }
 
     protected SlotResponse createSlot(UUID userId, String from, String to, SlotStatus status) {
@@ -89,11 +89,11 @@ public abstract class AbstractIntegrationTest {
     }
 
     protected SlotUpsertRequest slotRequest(String from, String to, SlotStatus status) {
-        return new SlotUpsertRequest(instant(from).atOffset(ZoneOffset.UTC), instant(to).atOffset(ZoneOffset.UTC), status);
+        return SlotUpsertRequest.builder().startsAt(instant(from).toString()).endsAt(instant(to).toString()).status(status).build();
     }
 
     protected CreateMeetingRequest meetingRequest(UUID organizerId, UUID slotId, List<UUID> participantIds) {
-        return new CreateMeetingRequest(organizerId, slotId, "Design review", "Review the scheduling API", participantIds);
+        return CreateMeetingRequest.builder().organizerId(organizerId).slotId(slotId).title("Design review").description("Review the scheduling API").participantIds(participantIds).build();
     }
 
     protected MeetingResponse createMeeting(UUID organizerId, UUID slotId, List<UUID> participantIds) {

@@ -73,29 +73,21 @@ class AvailabilityScaleIntegrationTest extends AbstractIntegrationTest {
         return new TransactionTemplate(transactionManager).execute(status -> {
             List<User> users = new ArrayList<>();
             for (int i = 0; i < 200; i++) {
-                User user = new User();
-                user.setName("Scale user " + i);
-                user.setEmail("scale-" + i + "@example.com");
-                user.setTimeZone("UTC");
-                users.add(user);
+                users.add(User.builder().name("Scale user " + i).email("scale-" + i + "@example.com").timeZone("UTC").build());
             }
             userRepository.saveAllAndFlush(users);
-            List<Calendar> calendars = users.stream().map(user -> {
-                Calendar calendar = new Calendar();
-                calendar.setUser(user);
-                return calendar;
-            }).toList();
+            List<Calendar> calendars = users.stream().map(user -> Calendar.builder().user(user).build()).toList();
             calendarRepository.saveAllAndFlush(calendars);
             List<TimeSlot> slots = new ArrayList<>();
             for (int user = 0; user < users.size(); user++) {
                 for (int day = 0; day < 25; day++) {
                     boolean source = user == 0 && day == 0;
-                    TimeSlot slot = new TimeSlot();
-                    slot.setCalendar(calendars.get(user));
-                    slot.setStartsAt(TEST_DATE.plusDays(day).atTime(source ? 10 : 9, 0).toInstant(ZoneOffset.UTC));
-                    slot.setEndsAt(TEST_DATE.plusDays(day).atTime(source ? 11 : 12, 0).toInstant(ZoneOffset.UTC));
-                    slot.setStatus(user == 199 && day == 0 ? SlotStatus.BUSY : SlotStatus.FREE);
-                    slots.add(slot);
+                    slots.add(TimeSlot.builder()
+                            .calendar(calendars.get(user))
+                            .startsAt(TEST_DATE.plusDays(day).atTime(source ? 10 : 9, 0).toInstant(ZoneOffset.UTC))
+                            .endsAt(TEST_DATE.plusDays(day).atTime(source ? 11 : 12, 0).toInstant(ZoneOffset.UTC))
+                            .statusCode((user == 199 && day == 0 ? SlotStatus.BUSY : SlotStatus.FREE).name())
+                            .build());
                 }
             }
             timeSlotRepository.saveAllAndFlush(slots);

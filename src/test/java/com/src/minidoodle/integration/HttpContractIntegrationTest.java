@@ -84,7 +84,7 @@ class HttpContractIntegrationTest extends AbstractIntegrationTest {
         assertError(post("/users/" + user + "/slots", slotBody("09:00", "09:00", "FREE")), 400, ApiErrorCode.INVALID_TIME_RANGE);
         assertError(post("/users/" + user + "/slots", slotBody("10:00", "09:00", "FREE")), 400, ApiErrorCode.INVALID_TIME_RANGE);
         assertError(post("/users/" + user + "/slots", Map.of("startsAt", "2035-06-01T09:00:00",
-                "endsAt", at("10:00"), "status", "FREE")), 400, ApiErrorCode.MALFORMED_JSON);
+                "endsAt", at("10:00"), "status", "FREE")), 400, ApiErrorCode.INVALID_TIME_RANGE);
 
         var created = post("/users/" + user + "/slots", Map.of("startsAt", "2035-06-01T11:00:00+02:00",
                 "endsAt", "2035-06-01T12:00:00+02:00", "status", "FREE"));
@@ -99,13 +99,13 @@ class HttpContractIntegrationTest extends AbstractIntegrationTest {
         String user = user();
         long startEpoch = OffsetDateTime.parse(at("09:00")).toEpochSecond();
         long endEpoch = OffsetDateTime.parse(at("10:00")).toEpochSecond();
-        for (Object start : List.of(startEpoch, Long.toString(startEpoch))) {
+        for (Object start : List.of(startEpoch, startEpoch + 0.5, Long.toString(startEpoch), Double.toString(startEpoch + 0.5))) {
             assertError(post("/users/" + user + "/slots", Map.of(
-                    "startsAt", start, "endsAt", at("10:00"), "status", "FREE")), 400, ApiErrorCode.MALFORMED_JSON);
+                    "startsAt", start, "endsAt", at("10:00"), "status", "FREE")), 400, ApiErrorCode.INVALID_TIME_RANGE);
         }
-        for (Object end : List.of(endEpoch, Long.toString(endEpoch))) {
+        for (Object end : List.of(endEpoch, endEpoch + 0.5, Long.toString(endEpoch), Double.toString(endEpoch + 0.5))) {
             assertError(post("/users/" + user + "/slots", Map.of(
-                    "startsAt", at("09:00"), "endsAt", end, "status", "FREE")), 400, ApiErrorCode.MALFORMED_JSON);
+                    "startsAt", at("09:00"), "endsAt", end, "status", "FREE")), 400, ApiErrorCode.INVALID_TIME_RANGE);
         }
     }
 

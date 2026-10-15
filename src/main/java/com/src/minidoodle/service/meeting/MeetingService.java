@@ -28,6 +28,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
+/**
+ * Coordinates atomic booking and cancellation across participant calendars.
+ * Calendar locks precede mutable scheduling reads and meeting-row locks, maintaining one lock order.
+ */
 @Service
 @RequiredArgsConstructor
 public class MeetingService {
@@ -40,6 +44,15 @@ public class MeetingService {
     private final MeetingValidationService meetingValidationService;
     private final EntityManager entityManager;
 
+    /**
+     * Books the organizer's entire source slot after checking every participant under coordination locks.
+     * The source is refreshed to discard stale managed state; participant coverage uses fresh scalar reads.
+     * Meeting metadata, membership and reservations commit together or all roll back.
+     *
+     * @param request validated meeting details, source slot and participant identifiers
+     * @return active meeting including its organizer in the deduplicated participant list
+     * @throws ApiException if users or the source are missing, limits are exceeded, or availability conflicts
+     */
     @Transactional
     public MeetingResponse create(CreateMeetingRequest request) {
         List<UUID> participantIds = meetingValidationService.normalizeParticipants(request);
@@ -58,13 +71,14 @@ public class MeetingService {
             throw new ApiException(HttpStatus.CONFLICT, ApiErrorCode.MEETING_CONFLICT, "The source slot must be free");
         }
         meetingValidationService.validateAvailability(List.copyOf(calendars.values()), source.getStartsAt(), source.getEndsAt());
-        Meeting meeting = new Meeting();
-        meeting.setOrganizer(userRepository.getReferenceById(request.organizerId()));
-        meeting.setSourceSlot(source);
-        meeting.setTitle(request.title().strip());
-        meeting.setDescription(request.description());
-        meeting.setStartsAt(source.getStartsAt());
-        meeting.setEndsAt(source.getEndsAt());
+        Meeting meeting = Meeting.builder()
+                .organizer(userRepository.getReferenceById(request.organizerId()))
+                .sourceSlot(source)
+                .title(request.title().strip())
+                .description(request.description())
+                .startsAt(source.getStartsAt())
+                .endsAt(source.getEndsAt())
+                .build();
         meeting = meetingRepository.saveAndFlush(meeting);
         for (UUID userId : participantIds) {
             meetingParticipantRepository.insert(meeting.getId(), userId);
@@ -73,13 +87,28 @@ public class MeetingService {
         return toResponse(meeting, participantIds);
     }
 
+    /**
+     * Reads meeting metadata and retained membership from a repeatable-read snapshot.
+     * Cancelled meetings remain readable even after their original slot is deleted.
+     *
+     * @param meetingId active or cancelled meeting identifier
+     * @return meeting details and original participants
+     * @throws ApiException if the meeting does not exist
+     */
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public MeetingResponse get(UUID meetingId) {
-        Meeting meeting = meetingRepository.findById(meetingId)
-                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.MEETING_NOT_FOUND, "Meeting not found"));
+        Meeting meeting = meetingRepository.findById(meetingId).orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.MEETING_NOT_FOUND, "Meeting not found"));
         return toResponse(meeting, getParticipantIds(meetingId));
     }
 
+    /**
+     * Releases only this meeting's reservations while preserving metadata and membership.
+     * Immutable participant IDs may be read before locking; mutable meeting state is loaded and refreshed
+     * after all calendars are locked. Repeating cancellation cannot release a newer meeting's reservations.
+     *
+     * @param meetingId meeting to cancel
+     * @throws ApiException if the meeting does not exist
+     */
     @Transactional
     public void cancel(UUID meetingId) {
         // Immutable membership is safe to read before locking; do not preload mutable meeting state.
@@ -88,29 +117,53 @@ public class MeetingService {
             throw new ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.MEETING_NOT_FOUND, "Meeting not found");
         }
         calendarLockService.lockUsers(participantIds);
-        Meeting meeting = meetingRepository.findLockedById(meetingId)
-                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.MEETING_NOT_FOUND, "Meeting not found"));
+        Meeting meeting = meetingRepository.findLockedById(meetingId).orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.MEETING_NOT_FOUND, "Meeting not found"));
         // A locking query does not replace state already loaded by an outer REQUIRED transaction.
         entityManager.refresh(meeting);
-        if (meeting.getCancelledAt() != null) return;
+        if (meeting.getCancelledAt() != null) {
+            return;
+        }
         meetingReservationRepository.deleteByIdMeetingId(meetingId);
         meeting.setCancelledAt(Instant.now());
     }
 
+    /**
+     * Represents both a missing source and a source outside the organizer's calendar.
+     *
+     * @return domain exception with the public slot lookup error code
+     */
     private ApiException sourceSlotNotFound() {
-        return new ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.SLOT_NOT_FOUND,
-                "Source slot was not found in the organizer's calendar");
+        return new ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.SLOT_NOT_FOUND, "Source slot was not found in the organizer's calendar");
     }
 
+    /**
+     * Reads immutable membership independently of active reservations, which disappear on cancellation.
+     *
+     * @param meetingId meeting identifier
+     * @return participant IDs in deterministic UUID order, or an empty list for a missing meeting
+     */
     private List<UUID> getParticipantIds(UUID meetingId) {
-        return meetingParticipantRepository.findByIdMeetingId(meetingId).stream()
-                .map(participant -> participant.getId().getUserId()).sorted().toList();
+        return meetingParticipantRepository.findByIdMeetingId(meetingId).stream().map(participant -> participant.getId().getUserId()).sorted().toList();
     }
 
+    /**
+     * Maps scalar metadata and relationship identifiers without initializing related entity graphs.
+     *
+     * @param meeting persisted meeting
+     * @param participantIds retained participant identifiers
+     * @return public details with status derived from the cancellation timestamp
+     */
     private MeetingResponse toResponse(Meeting meeting, List<UUID> participantIds) {
-        return new MeetingResponse(meeting.getId(), meeting.getOrganizer().getId(),
-                meeting.getSourceSlot() == null ? null : meeting.getSourceSlot().getId(),
-                meeting.getTitle(), meeting.getDescription(), meeting.getStartsAt(), meeting.getEndsAt(), participantIds,
-                meeting.getCancelledAt() == null ? MeetingStatus.ACTIVE : MeetingStatus.CANCELLED);
+        return MeetingResponse.builder()
+                .id(meeting.getId())
+                .organizerId(meeting.getOrganizer().getId())
+                .slotId(meeting.getSourceSlot() == null ? null : meeting.getSourceSlot().getId())
+                .title(meeting.getTitle())
+                .description(meeting.getDescription())
+                .startsAt(meeting.getStartsAt())
+                .endsAt(meeting.getEndsAt())
+                .participantIds(participantIds)
+                .status(meeting.getCancelledAt() == null ? MeetingStatus.ACTIVE : MeetingStatus.CANCELLED)
+                .build();
     }
 }

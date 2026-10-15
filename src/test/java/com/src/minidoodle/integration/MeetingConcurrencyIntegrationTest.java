@@ -96,9 +96,9 @@ class MeetingConcurrencyIntegrationTest extends AbstractIntegrationTest {
                 .containsExactlyElementsOf(participantSlots);
         var availability = availabilityService.personal(participant.id(), instant("08:00"), instant("13:00"));
         assertThat(availability.free()).containsExactly(
-                new TimeIntervalResponse(instant("09:00"), instant("10:00")),
-                new TimeIntervalResponse(instant("11:00"), instant("12:00")));
-        assertThat(availability.busy()).containsExactly(new TimeIntervalResponse(instant("10:00"), instant("11:00")));
+                TimeIntervalResponse.builder().startsAt(instant("09:00")).endsAt(instant("10:00")).build(),
+                TimeIntervalResponse.builder().startsAt(instant("11:00")).endsAt(instant("12:00")).build());
+        assertThat(availability.busy()).containsExactly(TimeIntervalResponse.builder().startsAt(instant("10:00")).endsAt(instant("11:00")).build());
     }
 
     @Test
@@ -123,7 +123,7 @@ class MeetingConcurrencyIntegrationTest extends AbstractIntegrationTest {
         assertThat(meetingReservationRepository.count()).isEqualTo(50);
         var occupied = availabilityService.common(everyone, instant("08:00"), instant("13:00"));
         assertThat(occupied.free()).isEmpty();
-        assertThat(occupied.busy()).containsExactly(new TimeIntervalResponse(instant("10:00"), instant("11:00")));
+        assertThat(occupied.busy()).containsExactly(TimeIntervalResponse.builder().startsAt(instant("10:00")).endsAt(instant("11:00")).build());
 
         meetingService.cancel(meeting.id());
 
@@ -135,7 +135,7 @@ class MeetingConcurrencyIntegrationTest extends AbstractIntegrationTest {
         assertThat(meetingReservationRepository.count()).isZero();
         assertThat(timeSlotRepository.count()).isEqualTo(50);
         var restored = availabilityService.common(everyone, instant("08:00"), instant("13:00"));
-        assertThat(restored.free()).containsExactly(new TimeIntervalResponse(instant("10:00"), instant("11:00")));
+        assertThat(restored.free()).containsExactly(TimeIntervalResponse.builder().startsAt(instant("10:00")).endsAt(instant("11:00")).build());
         assertThat(restored.busy()).isEmpty();
     }
 

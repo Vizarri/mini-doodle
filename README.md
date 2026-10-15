@@ -107,7 +107,7 @@ Errors have stable machine-readable codes and use `application/json`:
 }
 ```
 
-HTTP `400` covers malformed/invalid input, `404` missing resources, and `409` scheduling conflicts. Clients should branch on `code`, not message text. Shape validation uses `VALIDATION_FAILED` with `details.fields`; domain errors distinguish `SLOT_RESERVED`, `MEETING_CONFLICT`, `AVAILABILITY_REQUIRED` and other causes. Unexpected database errors are not presented as normal scheduling conflicts.
+HTTP `400` covers malformed/invalid input, `404` missing resources, and `409` scheduling conflicts. Invalid ISO timestamps or missing offsets use `INVALID_TIME_RANGE`; malformed JSON and invalid enum values use `MALFORMED_JSON`. Clients should branch on `code`, not message text. Shape validation uses `VALIDATION_FAILED` with `details.fields`; domain errors distinguish `SLOT_RESERVED`, `MEETING_CONFLICT`, `AVAILABILITY_REQUIRED` and other causes. Unexpected database errors are not presented as normal scheduling conflicts.
 
 ### Example flow
 

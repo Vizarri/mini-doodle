@@ -9,14 +9,24 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.NoArgsConstructor;
 import lombok.Getter;
 import lombok.Setter;
 
 import java.time.Instant;
 import java.util.UUID;
 
+/**
+ * User-declared availability for a half-open interval.
+ * Meeting reservations are stored separately, so booking never rewrites the declared status.
+ */
 @Getter
 @Setter
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
 @Entity
 @Table(name = "time_slots")
 public class TimeSlot {
@@ -25,19 +35,24 @@ public class TimeSlot {
     @Column(nullable = false, updatable = false)
     private UUID id;
 
+    /** Owning calendar whose coordination lock protects changes to this slot. */
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "calendar_id", nullable = false)
     private Calendar calendar;
 
+    /** Inclusive beginning of the occupied or declared interval. */
     @Column(name = "starts_at", nullable = false)
     private Instant startsAt;
 
+    /** Exclusive end; a following interval may start at this instant. */
     @Column(name = "ends_at", nullable = false)
     private Instant endsAt;
 
+    /** Stable FREE/BUSY persistence code; domain callers use the typed status accessors. */
     @Column(name = "status", nullable = false, length = 4)
     private String statusCode;
 
+    /** Assigns a UUID before the first insert when the caller has not supplied one. */
     @PrePersist
     void onCreate() {
         if (id == null) {
@@ -45,10 +60,18 @@ public class TimeSlot {
         }
     }
 
+    /**
+     * Resolves the persisted code without including meeting reservations.
+     * @return declared status, or {@code null} before it is assigned
+     */
     public SlotStatus getStatus() {
         return statusCode == null ? null : SlotStatus.valueOf(statusCode);
     }
 
+    /**
+     * Stores the stable enum name used by the database check constraint.
+     * @param status declared availability, or {@code null} while constructing the entity
+     */
     public void setStatus(SlotStatus status) {
         statusCode = status == null ? null : status.name();
     }

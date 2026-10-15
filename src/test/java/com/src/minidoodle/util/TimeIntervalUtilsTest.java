@@ -57,7 +57,6 @@ class TimeIntervalUtilsTest {
     }
 
     private static TimeInterval interval(int startHour, int endHour) {
-        return new TimeInterval(Instant.parse("2030-01-01T%02d:00:00Z".formatted(startHour)),
-                Instant.parse("2030-01-01T%02d:00:00Z".formatted(endHour)));
+        return TimeInterval.builder().startsAt(Instant.parse("2030-01-01T%02d:00:00Z".formatted(startHour))).endsAt(Instant.parse("2030-01-01T%02d:00:00Z".formatted(endHour))).build();
     }
 }
