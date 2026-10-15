@@ -162,19 +162,24 @@ mvn verify
 
 Test packages mirror application packages under `unit` and `integration`, for example `unit.util`, `integration.controller` and `integration.service.meeting`. The shared PostgreSQL fixture remains in `integration.AbstractIntegrationTest`.
 
-The normal Maven lifecycle runs unit and PostgreSQL integration tests. Integration tests do not silently pass or skip when Docker is unavailable. They apply the actual Flyway migration, reset business tables between tests and use shared fixture helpers.
+The normal Maven lifecycle runs unit and PostgreSQL integration tests and generates a JaCoCo coverage report at `target/site/jacoco/index.html` (XML: `target/site/jacoco/jacoco.xml`). Integration tests do not silently pass or skip when Docker is unavailable. They apply the actual Flyway migration, reset business tables between tests and use shared fixture helpers.
 
-For a quick interval-only run without Docker:
+For the complete unit suite without Docker:
 
 ```sh
-mvn -Dtest=TimeIntervalUtilsTest test
+mvn -DexcludedGroups=integration test
 ```
+
+Unit tests cover interval operations and invariants, normalization, request limits, availability guards, calendar lock inputs and error mapping. They use repository mocks only where the validation rule depends on persisted data.
 
 The integration suite covers:
 
-- HTTP contracts through MockMvc: DTO validation, specific error codes, timestamp/status boundaries, slot CRUD, booking, cancellation and availability.
+- HTTP contracts through MockMvc: DTO validation and exact input limits, error envelopes for binding and protocol failures, timestamp/status boundaries, slot CRUD, booking, cancellation and availability.
 - Transactional concurrency with actual PostgreSQL lock contention, including both orderings of booking versus participant slot changes, competing bookings and cancellation.
 - Booking and cancellation with 50 participants, preserving declared slots and meeting history.
+- Ownership checks, participant deduplication, persisted pagination and rollback after actual SQL failures during user/calendar and meeting/reservation creation.
+- PostgreSQL exclusion constraints tested directly through repositories, bypassing service guards: overlap is rejected; adjacency and independent calendars are allowed.
+- Calendar locking through the Spring proxy: an existing transaction is required and locks follow PostgreSQL UUID ordering.
 - Existing persistence contexts containing stale slots and meetings: committed changes and deletions must be observed before booking, slot mutation or repeated cancellation.
 - A fixture of 200 users and 5,000 slots: exact personal/shared availability and a bounded SQL query count for one and 50 users.
 - Booking, availability and cancellation with a connection pool of size one.
