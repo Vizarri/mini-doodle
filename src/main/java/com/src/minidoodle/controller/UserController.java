@@ -3,6 +3,7 @@ package com.src.minidoodle.controller;
 import com.src.minidoodle.dto.request.CreateUserRequest;
 import com.src.minidoodle.dto.response.ApiError;
 import com.src.minidoodle.dto.response.UserResponse;
+import com.src.minidoodle.exception.ApiException;
 import com.src.minidoodle.service.user.UserService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -37,6 +38,9 @@ import static com.src.minidoodle.constant.OpenApiConstants.HTTP_404;
 import static com.src.minidoodle.constant.OpenApiConstants.HTTP_409;
 import static com.src.minidoodle.constant.OpenApiConstants.HTTP_500;
 
+/**
+ * Exposes user identities while keeping their calendars internal to the domain.
+ */
 @RestController
 @RequiredArgsConstructor
 @RequestMapping(value = USERS, produces = MediaType.APPLICATION_JSON_VALUE)
@@ -54,6 +58,13 @@ import static com.src.minidoodle.constant.OpenApiConstants.HTTP_500;
 public class UserController {
     private final UserService userService;
 
+    /**
+     * Creates a user and their calendar in one transaction.
+     *
+     * @param request user name, unique email and IANA time zone
+     * @return the created user with a 201 status and resource Location header
+     * @throws ApiException if the time zone is invalid or the email is already registered
+     */
     @PostMapping(consumes = MediaType.APPLICATION_JSON_VALUE)
     @Operation(operationId = "userCreate", summary = "Create a user", description = "Creates a user and one internal calendar. Email must be unique.")
     @ApiResponse(responseCode = HTTP_201, description = "User created",
@@ -63,6 +74,13 @@ public class UserController {
         return ResponseEntity.created(URI.create(USERS + "/" + user.id())).body(user);
     }
 
+    /**
+     * Reads the public profile of an existing user.
+     *
+     * @param userId user identifier
+     * @return the user profile without internal calendar data
+     * @throws ApiException if the user does not exist
+     */
     @GetMapping(USER_ID)
     @Operation(operationId = "userGet", summary = "Get user details")
     @ApiResponse(responseCode = HTTP_200, description = "User details",

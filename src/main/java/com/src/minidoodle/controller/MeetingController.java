@@ -3,6 +3,7 @@ package com.src.minidoodle.controller;
 import com.src.minidoodle.dto.request.CreateMeetingRequest;
 import com.src.minidoodle.dto.response.ApiError;
 import com.src.minidoodle.dto.response.MeetingResponse;
+import com.src.minidoodle.exception.ApiException;
 import com.src.minidoodle.service.meeting.MeetingService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -39,6 +40,9 @@ import static com.src.minidoodle.constant.OpenApiConstants.HTTP_404;
 import static com.src.minidoodle.constant.OpenApiConstants.HTTP_409;
 import static com.src.minidoodle.constant.OpenApiConstants.HTTP_500;
 
+/**
+ * Exposes atomic meeting booking and cancellation while retaining meeting history.
+ */
 @RestController
 @RequiredArgsConstructor
 @RequestMapping(value = MEETINGS, produces = MediaType.APPLICATION_JSON_VALUE)
@@ -56,6 +60,13 @@ import static com.src.minidoodle.constant.OpenApiConstants.HTTP_500;
 public class MeetingController {
     private final MeetingService meetingService;
 
+    /**
+     * Books the entire source slot for the organizer and all requested participants.
+     *
+     * @param request source slot, meeting details and participant identifiers
+     * @return the created meeting with a 201 status and resource Location header
+     * @throws ApiException if a resource is missing, participant limits are exceeded or any participant is unavailable
+     */
     @PostMapping(consumes = MediaType.APPLICATION_JSON_VALUE)
     @Operation(operationId = "meetingCreate", summary = "Book a meeting", description = "Books the complete source slot for all participants or rejects the entire operation. Organizer is included automatically.")
     @ApiResponse(responseCode = HTTP_201, description = "Meeting created",
@@ -65,6 +76,13 @@ public class MeetingController {
         return ResponseEntity.created(URI.create(MEETINGS + "/" + meeting.id())).body(meeting);
     }
 
+    /**
+     * Reads meeting details, including the retained membership of a cancelled meeting.
+     *
+     * @param meetingId meeting identifier
+     * @return meeting details and its current status
+     * @throws ApiException if the meeting does not exist
+     */
     @GetMapping(MEETING_ID)
     @Operation(operationId = "meetingGet", summary = "Get meeting details", description = "Includes retained membership for cancelled meetings.")
     @ApiResponse(responseCode = HTTP_200, description = "Meeting details",
@@ -73,6 +91,13 @@ public class MeetingController {
         return meetingService.get(meetingId);
     }
 
+    /**
+     * Cancels a meeting and releases every reservation; repeated cancellation is idempotent.
+     *
+     * @param meetingId meeting identifier
+     * @return an empty 204 response after cancellation
+     * @throws ApiException if the meeting does not exist
+     */
     @DeleteMapping(MEETING_ID)
     @Operation(operationId = "meetingCancel", summary = "Cancel a meeting", description = "Releases reservations while retaining meeting details. Repeated cancellation is idempotent.")
     @ApiResponse(responseCode = HTTP_204, description = "Meeting cancelled", content = @Content)

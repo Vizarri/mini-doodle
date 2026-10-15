@@ -1,6 +1,9 @@
 package com.src.minidoodle.enums;
 
-/** Stable machine-readable API errors; clients should not interpret message text. */
+/**
+ * Stable machine-readable failure categories exposed in {@code ApiError.code}.
+ * Clients use these values for branching; human-readable messages may change independently.
+ */
 public enum ApiErrorCode {
     BAD_REQUEST,
     VALIDATION_FAILED,

@@ -1,6 +1,9 @@
 package com.src.minidoodle.constant;
 
-/** Public API routes. Calendar management intentionally has no public endpoint. */
+/**
+ * Compile-time route fragments shared by controllers and resource Location headers.
+ * Scheduling resources belong to users; calendars remain an internal domain concept.
+ */
 public final class ApiPaths {
     public static final String USERS = "/users";
     public static final String USER_ID = "/{userId}";

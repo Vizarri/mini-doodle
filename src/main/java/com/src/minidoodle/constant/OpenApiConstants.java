@@ -1,6 +1,9 @@
 package com.src.minidoodle.constant;
 
-/** Shared OpenAPI response codes and descriptions. */
+/**
+ * Compile-time HTTP code strings and error descriptions for OpenAPI annotations.
+ * Sharing these values keeps the documented response contract consistent across controllers.
+ */
 public final class OpenApiConstants {
     public static final String HTTP_200 = "200";
     public static final String HTTP_201 = "201";

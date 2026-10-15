@@ -2,6 +2,7 @@ package com.src.minidoodle.controller;
 
 import com.src.minidoodle.dto.response.ApiError;
 import com.src.minidoodle.dto.response.AvailabilityResponse;
+import com.src.minidoodle.exception.ApiException;
 import com.src.minidoodle.service.availability.AvailabilityService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -35,6 +36,9 @@ import static com.src.minidoodle.constant.OpenApiConstants.HTTP_404;
 import static com.src.minidoodle.constant.OpenApiConstants.HTTP_409;
 import static com.src.minidoodle.constant.OpenApiConstants.HTTP_500;
 
+/**
+ * Exposes effective availability within bounded windows, omitting undeclared time.
+ */
 @RestController
 @RequiredArgsConstructor
 @RequestMapping(produces = MediaType.APPLICATION_JSON_VALUE)
@@ -52,6 +56,15 @@ import static com.src.minidoodle.constant.OpenApiConstants.HTTP_500;
 public class AvailabilityController {
     private final AvailabilityService availabilityService;
 
+    /**
+     * Subtracts active reservations from declared free time and merges busy intervals.
+     *
+     * @param userId user whose availability is requested
+     * @param from inclusive window start with an explicit UTC offset
+     * @param to exclusive window end with an explicit UTC offset
+     * @return merged free and busy intervals clipped to the requested window
+     * @throws ApiException if the user is missing or the query window is invalid
+     */
     @GetMapping(USER_AVAILABILITY)
     @Operation(operationId = "availabilityPersonal", summary = "Get personal availability", description = "Subtracts reservations from declared free time, merges adjacent intervals and clips to the window. Undeclared time is omitted.")
     @ApiResponse(responseCode = HTTP_200, description = "Personal availability",
@@ -64,6 +77,15 @@ public class AvailabilityController {
         return availabilityService.personal(userId, from.toInstant(), to.toInstant());
     }
 
+    /**
+     * Intersects effective free time and unions busy time across the requested users.
+     *
+     * @param userIds identifiers of the users whose schedules are combined
+     * @param from inclusive window start with an explicit UTC offset
+     * @param to exclusive window end with an explicit UTC offset
+     * @return shared free time and combined busy time clipped to the requested window
+     * @throws ApiException if any user is missing or the user count or query window is invalid
+     */
     @GetMapping(AVAILABILITY)
     @Operation(operationId = "availabilityCommon", summary = "Get shared availability", description = "Intersects free time and unions busy time across users. Undeclared time does not become free.")
     @ApiResponse(responseCode = HTTP_200, description = "Shared availability",

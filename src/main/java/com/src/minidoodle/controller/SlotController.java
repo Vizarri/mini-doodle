@@ -3,6 +3,7 @@ package com.src.minidoodle.controller;
 import com.src.minidoodle.dto.request.SlotUpsertRequest;
 import com.src.minidoodle.dto.response.ApiError;
 import com.src.minidoodle.dto.response.SlotResponse;
+import com.src.minidoodle.exception.ApiException;
 import com.src.minidoodle.service.slot.SlotService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -53,6 +54,9 @@ import static com.src.minidoodle.constant.OpenApiConstants.HTTP_404;
 import static com.src.minidoodle.constant.OpenApiConstants.HTTP_409;
 import static com.src.minidoodle.constant.OpenApiConstants.HTTP_500;
 
+/**
+ * Manages declared availability; active reservations protect slots from modification or deletion.
+ */
 @RestController
 @RequiredArgsConstructor
 @Validated
@@ -71,6 +75,14 @@ import static com.src.minidoodle.constant.OpenApiConstants.HTTP_500;
 public class SlotController {
     private final SlotService slotService;
 
+    /**
+     * Adds a declared free or busy interval; adjacent intervals are allowed.
+     *
+     * @param userId owner of the slot
+     * @param request complete slot interval and declared status
+     * @return the created slot with a 201 status and resource Location header
+     * @throws ApiException if the user is missing, the interval is invalid or it overlaps another slot
+     */
     @PostMapping(consumes = MediaType.APPLICATION_JSON_VALUE)
     @Operation(operationId = "slotCreate", summary = "Create a free or busy slot", description = "Slots must not overlap. Adjacent half-open intervals are allowed.")
     @ApiResponse(responseCode = HTTP_201, description = "Slot created",
@@ -80,6 +92,17 @@ public class SlotController {
         return ResponseEntity.created(URI.create(USERS + "/" + userId + "/slots/" + slot.id())).body(slot);
     }
 
+    /**
+     * Lists complete slot intervals overlapping the half-open query window.
+     *
+     * @param userId owner of the slots
+     * @param from inclusive window start with an explicit UTC offset
+     * @param to exclusive window end with an explicit UTC offset
+     * @param limit maximum number of slots to return
+     * @param offset number of matching slots to skip
+     * @return matching slots ordered by start time and identifier, without clipping their boundaries
+     * @throws ApiException if the user is missing or query bounds or pagination are invalid
+     */
     @GetMapping
     @Operation(operationId = "slotList", summary = "List declared slots", description = "Returns complete intervals overlapping the window, ordered by start and ID. Maximum window: 31 days.")
     @ApiResponse(responseCode = HTTP_200, description = "Declared slots",
@@ -94,15 +117,31 @@ public class SlotController {
         return slotService.list(userId, from.toInstant(), to.toInstant(), limit, offset);
     }
 
+    /**
+     * Replaces all mutable fields of an unreserved slot.
+     *
+     * @param userId owner of the slot
+     * @param slotId slot identifier
+     * @param request complete replacement interval and declared status
+     * @return the updated slot
+     * @throws ApiException if ownership is invalid, the slot is reserved or the replacement interval is invalid or overlaps
+     */
     @PatchMapping(value = SLOT_ID, consumes = MediaType.APPLICATION_JSON_VALUE)
     @Operation(operationId = "slotUpdate", summary = "Update a slot", description = "Requires all slot fields. A slot overlapping an active reservation cannot be changed.")
     @ApiResponse(responseCode = HTTP_200, description = "Updated slot",
             content = @Content(schema = @Schema(implementation = SlotResponse.class)))
-    public SlotResponse update(@PathVariable UUID userId, @PathVariable UUID slotId,
-                               @Valid @RequestBody SlotUpsertRequest request) {
+    public SlotResponse update(@PathVariable UUID userId, @PathVariable UUID slotId, @Valid @RequestBody SlotUpsertRequest request) {
         return slotService.update(userId, slotId, request);
     }
 
+    /**
+     * Removes a slot only when no active reservation overlaps it.
+     *
+     * @param userId owner of the slot
+     * @param slotId slot identifier
+     * @return an empty 204 response after deletion
+     * @throws ApiException if ownership is invalid or the slot overlaps an active reservation
+     */
     @DeleteMapping(SLOT_ID)
     @Operation(operationId = "slotDelete", summary = "Delete an unreserved slot")
     @ApiResponse(responseCode = HTTP_204, description = "Slot deleted", content = @Content)
